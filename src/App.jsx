@@ -391,8 +391,11 @@ export default function Doorstep() {
   const [filter, setFilter] = useState("Going soonest");
   const [typeFilter, setTypeFilter] = useState("all");
   const [q, setQ] = useState("");
+  const [hints, setHints] = useState([]);
+  const [hintsOpen, setHintsOpen] = useState(false);
   const [sort, setSort] = useState("time");
   const [radius, setRadius] = useState(2);
+  const [customRadius, setCustomRadius] = useState(false);
   const [items, setItems] = useState([]);
   /* how the current page relates to the whole result: total, whether there is
      more to fetch, and whether a fetch is in flight */
@@ -571,7 +574,10 @@ export default function Doorstep() {
     if (screen === "wishes") api("/wishes", { token }).then((d) => setWishes(d.wishes)).catch(() => {});
     if (screen === "mine") {
       api("/me/stuff", { token }).then(setStuff).catch(() => {});
-      if (tab === "wishes") api("/wishes", { token }).then((d) => setWishes(d.wishes)).catch(() => {});
+      /* always, not just when the wish tab happens to be open: this effect
+         does not re-run on a tab change, so the tab was left empty while the
+         standalone screen showed the same wishes fine */
+      api("/wishes", { token }).then((d) => setWishes(d.wishes)).catch(() => {});
     }
     if (screen === "impact") api("/impact", { token }).then(setImpact).catch(() => {});
     if (screen === "profile") api("/blocks", { token }).then((d) => setBlocked(d.blocked)).catch(() => {});
@@ -593,7 +599,7 @@ export default function Doorstep() {
       setNotes((list) => list.map((n) => ({ ...n, read: true })));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, token]);
+  }, [screen, token, tab]);
 
   /* the feed refreshes for guests too */
   const browsing = ["home", "map", "detail", "give", "profile", "notifications", "wishes", "impact", "fallback", "mine"].includes(screen);
@@ -609,6 +615,20 @@ export default function Doorstep() {
       clearInterval(poll);
     };
   }, [browsing, token, fetchItems, sort, q, typeFilter, filter, radius, savedOnly, screen]);
+
+  /* suggestions come from what is genuinely listed right now */
+  useEffect(() => {
+    if (!hintsOpen || q.trim().length < 2) {
+      setHints([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      api(`/suggest?q=${encodeURIComponent(q.trim())}`, { token: token || undefined })
+        .then((d) => setHints(d.suggestions))
+        .catch(() => setHints([]));
+    }, 180);
+    return () => clearTimeout(t);
+  }, [q, hintsOpen, token]);
 
   useEffect(() => {
     if (!toast) return;
@@ -2567,21 +2587,81 @@ export default function Doorstep() {
             </h1>
             <p className="feed-sub">Claim it, then collect from the doorstep.</p>
 
-            <div className="search-row">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
-                <circle cx="11" cy="11" r="7" />
-                <path d="M21 21l-4.3-4.3" />
-              </svg>
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search bookcase, bike, pots"
-                aria-label="Search items"
-              />
-              {q && (
-                <button className="search-clear" aria-label="Clear search" onClick={() => setQ("")}>
-                  ×
-                </button>
+            <div className="search-wrap">
+              <div className={`search-row ${hintsOpen && hints.length ? "open" : ""}`}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="M21 21l-4.3-4.3" />
+                </svg>
+                <input
+                  value={q}
+                  onChange={(e) => {
+                    setQ(e.target.value);
+                    setHintsOpen(true);
+                  }}
+                  onFocus={() => setHintsOpen(true)}
+                  onBlur={() => setTimeout(() => setHintsOpen(false), 140)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setHintsOpen(false);
+                    if (e.key === "Enter") setHintsOpen(false);
+                  }}
+                  placeholder="What are you after?"
+                  aria-label="Search items"
+                  autoComplete="off"
+                />
+                {q && (
+                  <button
+                    className="search-clear"
+                    aria-label="Clear search"
+                    onClick={() => {
+                      setQ("");
+                      setHintsOpen(false);
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+
+              {hintsOpen && hints.length > 0 && (
+                <ul className="hints" role="listbox" aria-label="Suggestions">
+                  {hints.map((h, i) => (
+                    <li key={`${h.kind}-${h.label}-${i}`}>
+                      <button
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          if (h.kind === "category") {
+                            setQ("");
+                            setFilter(h.label);
+                          } else {
+                            setQ(h.label);
+                          }
+                          setHintsOpen(false);
+                        }}
+                      >
+                        {h.kind === "category" ? (
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                            <rect x="4" y="4" width="16" height="16" rx="3" />
+                            <path d="M4 10h16" />
+                          </svg>
+                        ) : (
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                            <circle cx="11" cy="11" r="7" />
+                            <path d="M21 21l-4.3-4.3" />
+                          </svg>
+                        )}
+                        <span>{h.label}</span>
+                        {h.kind === "category" ? (
+                          <em>category</em>
+                        ) : h.type === "food" ? (
+                          <em className="food">food</em>
+                        ) : (
+                          <em>{h.cat}</em>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
 
@@ -2669,13 +2749,50 @@ export default function Doorstep() {
               </button>
               <div className="segment" role="group" aria-label="Distance radius">
                 {RADII.map((r) => (
-                  <button key={r.label} aria-pressed={radius === r.v} onClick={() => setRadius(r.v)}>
+                  <button
+                    key={r.label}
+                    aria-pressed={!customRadius && radius === r.v}
+                    onClick={() => {
+                      setCustomRadius(false);
+                      setRadius(r.v);
+                    }}
+                  >
                     {r.label}
                   </button>
                 ))}
+                <button
+                  aria-pressed={customRadius}
+                  onClick={() => {
+                    setCustomRadius(true);
+                    if (!Number.isFinite(radius)) setRadius(3);
+                  }}
+                >
+                  Set it
+                </button>
               </div>
             </div>
             </div>
+
+            {customRadius && (
+              <div className="radius-set">
+                <label htmlFor="radius-slider">
+                  Within <b>{radius < 1 ? `${Math.round(radius * 1760)} yards` : `${radius} miles`}</b>
+                </label>
+                <input
+                  id="radius-slider"
+                  type="range"
+                  min="0.25"
+                  max="10"
+                  step="0.25"
+                  value={Number.isFinite(radius) ? radius : 3}
+                  onChange={(e) => setRadius(Number(e.target.value))}
+                />
+                <span className="radius-ends">
+                  <em>quarter mile</em>
+                  <em>10 miles</em>
+                </span>
+              </div>
+            )}
 
             {feed.loading && visible.length === 0 && (
               <div className="feed-loading" aria-hidden="true">
@@ -2774,6 +2891,7 @@ export default function Doorstep() {
                           </button>
                         )}
                         <span className={`gcard-timer ${urgent ? "urgent" : ""}`}>{formatLeft(remaining)}</span>
+                        {item.dist && <span className="gcard-dist">{item.dist}</span>}
                         {item.type === "food" && !gone && !mine && !item.owner && (
                           <span className="gcard-food">Food</span>
                         )}

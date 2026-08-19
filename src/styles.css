@@ -1970,6 +1970,25 @@
 
 .gcard-timer.urgent { background: var(--signal); color: var(--ink); }
 
+/* how long you have, and how far you would go — the two things worth knowing
+   before opening a listing, one in each bottom corner */
+.gcard-dist {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--meter);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #FFF;
+  background: rgba(20, 38, 31, 0.72);
+  border-radius: 20px;
+  padding: 4px 9px;
+  backdrop-filter: blur(2px);
+}
+
 .gcard-state {
   position: absolute;
   left: 7px;
@@ -2402,3 +2421,148 @@
 }
 
 .field .detail-hint { margin: 6px 0 0; }
+
+
+/* ---------- pick your own distance ---------- */
+
+.radius-set {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  padding: 13px 15px 11px;
+  margin: 0 0 16px;
+}
+
+.radius-set label {
+  display: block;
+  font-size: 13.5px;
+  color: var(--hush);
+  margin-bottom: 9px;
+}
+
+.radius-set label b {
+  color: var(--railing);
+  font-family: var(--meter);
+  font-size: 14.5px;
+  font-weight: 500;
+}
+
+.radius-set input[type="range"] {
+  width: 100%;
+  height: 4px;
+  border-radius: 3px;
+  appearance: none;
+  background: rgba(20, 38, 31, 0.12);
+  outline: none;
+}
+
+.radius-set input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--railing);
+  border: 3px solid var(--card);
+  box-shadow: 0 2px 6px rgba(20, 38, 31, 0.3);
+  cursor: pointer;
+}
+
+.radius-set input[type="range"]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--railing);
+  border: 3px solid var(--card);
+  cursor: pointer;
+}
+
+.radius-set input[type="range"]:focus-visible { outline: 2px solid var(--railing); outline-offset: 4px; }
+
+.radius-ends {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+
+.radius-ends em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--hush);
+}
+
+
+/* ---------- search ---------- */
+
+.search-wrap { position: relative; z-index: 30; margin-bottom: 14px; }
+
+.search-wrap .search-row {
+  margin-bottom: 0;
+  border-width: 1.5px;
+  transition: border-color .15s, box-shadow .15s, border-radius .15s;
+}
+
+/* the field and its suggestions read as one object */
+.search-row.open {
+  border-radius: 24px 24px 0 0;
+  border-bottom-color: transparent;
+  box-shadow: 0 0 0 3px rgba(35, 74, 59, 0.09);
+}
+
+.hints {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin: 0;
+  padding: 4px 0 6px;
+  list-style: none;
+  background: var(--card);
+  border: 1.5px solid var(--railing);
+  border-top: none;
+  border-radius: 0 0 20px 20px;
+  box-shadow: 0 12px 26px rgba(20, 38, 31, 0.14);
+  overflow: hidden;
+  animation: fade-up .14s ease-out;
+}
+
+.hints li { margin: 0; }
+
+.hints button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 11px 17px;
+  cursor: pointer;
+  font-family: var(--body);
+  font-size: 14.5px;
+  color: var(--ink);
+}
+
+.hints button:hover { background: #F1F4EF; }
+.hints button svg { flex: none; color: var(--hush); }
+
+.hints button span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hints button em {
+  flex: none;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--hush);
+  background: var(--render);
+  border-radius: 20px;
+  padding: 3px 8px;
+}
+
+.hints button em.food { background: var(--signal); color: var(--ink); }

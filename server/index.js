@@ -951,6 +951,35 @@ app.get("/api/detail-fields", (req, res) => {
   });
 });
 
+/* Type-ahead for the search box: what is actually out there right now,
+   rather than a list of words someone once guessed at. */
+app.get(
+  "/api/suggest",
+  maybeAuth,
+  wrap(async (req, res) => {
+    const q = String(req.query.q || "").trim();
+    if (q.length < 2) return res.json({ suggestions: [] });
+    const now = Date.now();
+
+    const rows = await query(
+      `SELECT title, cat, type, COUNT(*) OVER () AS _n
+       FROM items
+       WHERE expires_at > $1 AND hidden_at IS NULL AND title ILIKE $2
+       ORDER BY expires_at LIMIT 6`,
+      [now, `%${q}%`]
+    );
+
+    const cats = [...NONFOOD_CATS, ...FOOD_CATS].filter((c) => c.toLowerCase().includes(q.toLowerCase()));
+
+    res.json({
+      suggestions: [
+        ...cats.slice(0, 2).map((c) => ({ kind: "category", label: c })),
+        ...rows.map((r) => ({ kind: "item", label: r.title, cat: r.cat, type: r.type })),
+      ].slice(0, 7),
+    });
+  })
+);
+
 app.get("/api/categories", (req, res) => {
   res.json({
     food: FOOD_CATS.map((c) => ({ cat: c, kind: FOOD_KIND[c] || "meal" })),
