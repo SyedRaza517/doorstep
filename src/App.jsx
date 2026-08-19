@@ -434,7 +434,7 @@ export default function Doorstep() {
   const [items, setItems] = useState([]);
   /* how the current page relates to the whole result: total, whether there is
      more to fetch, and whether a fetch is in flight */
-  const [feed, setFeed] = useState({ total: 0, more: false, loading: true });
+  const [feed, setFeed] = useState({ total: 0, elsewhere: 0, more: false, loading: true });
   const [toast, setToast] = useState(null);
   const [give, setGive] = useState(EMPTY_GIVE);
   const [giveErrors, setGiveErrors] = useState({});
@@ -511,7 +511,12 @@ export default function Doorstep() {
           const seen = new Set(list.map((i) => i.id));
           return [...list, ...data.items.filter((i) => !seen.has(i.id))];
         });
-        setFeed({ total: data.total ?? data.items.length, more: !!data.more, loading: false });
+        setFeed({
+          total: data.total ?? data.items.length,
+          elsewhere: data.elsewhere || 0,
+          more: !!data.more,
+          loading: false,
+        });
       } catch (e) {
         setFeed((f) => ({ ...f, loading: false }));
         if (e.status === 401) signOut("Your session expired — you're browsing as a guest.");
@@ -3062,14 +3067,39 @@ export default function Doorstep() {
                   <path d="M9 8V6a3 3 0 0 1 6 0v2" />
                 </svg>
                 <b>
-                  {q.trim()
-                    ? `Nothing matching "${q.trim()}" just now`
-                    : savedOnly
-                      ? "Nothing saved yet"
-                      : typeFilter === "food"
-                        ? "No food going right now"
-                        : "Nothing here right now"}
+                  {feed.elsewhere > 0
+                    ? `Nothing within ${radius === 0.5 ? "half a mile" : `${radius} miles`} of you`
+                    : q.trim()
+                      ? `Nothing matching "${q.trim()}" just now`
+                      : savedOnly
+                        ? "Nothing saved yet"
+                        : typeFilter === "food"
+                          ? "No food going right now"
+                          : "Nothing here right now"}
                 </b>
+
+                {/* an empty screen looks broken. If things are going, just
+                    further away, say so and open the door. */}
+                {feed.elsewhere > 0 && (
+                  <>
+                    <span>
+                      {feed.elsewhere === 1
+                        ? "One thing is going further out."
+                        : `${feed.elsewhere} things are going further out.`}{" "}
+                      Doorstep is starting in Hackney, so most of it is around London Fields for now.
+                    </span>
+                    <button
+                      className="primary-btn"
+                      onClick={() => {
+                        setRadius(0);
+                        setCustomRadius(false);
+                      }}
+                    >
+                      Show me everything
+                    </button>
+                  </>
+                )}
+
                 <span>
                   {q.trim() || filter !== "Going soonest"
                     ? "Try a wider radius, or add it to your wish list and we'll tell you the moment one appears."

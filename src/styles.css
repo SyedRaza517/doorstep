@@ -2266,11 +2266,17 @@
 /* nobody should meet a blank screen */
 .empty-state {
   text-align: center;
-  padding: 34px 18px;
+  /* sits high enough that its button clears the tab bar without scrolling */
+  padding: 6px 18px 96px;
   color: var(--hush);
 }
 
-.empty-state svg { color: var(--rule); margin-bottom: 12px; }
+.empty-state .primary-btn {
+  margin: 16px auto 0;
+  max-width: 260px;
+}
+
+.empty-state svg { color: var(--rule); margin-bottom: 8px; }
 .empty-state b { display: block; font-family: var(--display); font-size: 17px; color: var(--ink); margin-bottom: 5px; }
 .empty-state span { font-size: 14px; line-height: 1.55; }
 

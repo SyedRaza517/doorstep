@@ -703,6 +703,8 @@ app.get(
 
     /* radius, as a bounding box in degrees — a mile is about 1/69 of a degree
        of latitude, and longitude narrows with the cosine of latitude */
+    const clauseBeforeRadius = clause;
+    const paramsBeforeRadius = [...params];
     const radius = Number(req.query.radius);
     if (radius > 0 && Number.isFinite(radius) && req.user.lat != null) {
       const dLat = radius / 69;
@@ -713,6 +715,9 @@ app.get(
     }
 
     const visible = { clause, params };
+    /* the same search with the distance limit lifted, so an empty screen can
+       tell someone their neighbourhood is quiet rather than look broken */
+    const wider = { clause: clauseBeforeRadius, params: paramsBeforeRadius };
 
     /* sorting by distance has to happen in the database, or paging would
        reorder only the slice we happened to fetch */
@@ -728,10 +733,19 @@ app.get(
       )
     ).map(castItem);
 
+    /* nothing nearby is worth explaining, but only if there is something to
+       explain — one extra count, and only when the screen would be empty */
+    let elsewhere = 0;
+    if (num(total) === 0 && wider.clause !== visible.clause) {
+      const [{ n }] = await query(`SELECT COUNT(*) AS n FROM items WHERE ${wider.clause}`, wider.params);
+      elsewhere = num(n);
+    }
+
     const ctx = await itemContext(rows, req.user);
     res.json({
       items: rows.map((it) => publicItem(it, req.user, now, ctx)),
       total: num(total),
+      elsewhere,
       offset,
       limit,
       more: offset + rows.length < num(total),
