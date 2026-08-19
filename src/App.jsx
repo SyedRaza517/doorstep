@@ -188,7 +188,7 @@ const SPOT_OPTIONS = [
 ];
 
 const RADII = [
-  { v: 0.5, label: "½ mi" },
+  { v: 0.5, label: "0.5 mi" },
   { v: 1, label: "1 mi" },
   { v: 2, label: "2 mi" },
   { v: Infinity, label: "All" },
@@ -1056,7 +1056,7 @@ export default function Doorstep() {
               )}
 
               <button className="primary-btn" onClick={submit} disabled={busy}>
-                {busy ? "One moment…" : signup ? "Create account" : "Sign in"}
+                {busy ? "One moment" : signup ? "Create account" : "Sign in"}
               </button>
               {errors._form && <p className="field-note form-note">{errors._form}</p>}
 
@@ -1170,7 +1170,7 @@ export default function Doorstep() {
                       </div>
                     </div>
                     <button className="primary-btn" onClick={saveEdit} disabled={busy}>
-                      {busy ? "Saving…" : "Save changes"}
+                      {busy ? "Saving" : "Save changes"}
                     </button>
                     <button className="retake" onClick={() => setEditing(null)}>
                       Cancel
@@ -1445,7 +1445,7 @@ export default function Doorstep() {
                   <b>{w.keyword || w.cat}</b>
                   <small>
                     {w.cat !== "Anything" && w.keyword ? `${w.cat} · ` : ""}
-                    within {w.radius === 0.5 ? "½ mile" : `${w.radius} miles`}
+                    within {w.radius === 0.5 ? "0.5 miles" : `${w.radius} miles`}
                     {w.found > 0 ? ` · found ${w.found}` : ""}
                   </small>
                 </span>
@@ -1514,7 +1514,7 @@ export default function Doorstep() {
             id="al-word"
             value={newWish.keyword}
             onChange={(e) => setNewWish((w) => ({ ...w, keyword: e.target.value }))}
-            placeholder="cot, desk, monstera…"
+            placeholder="cot, desk, monstera"
           />
         </div>
 
@@ -1534,7 +1534,7 @@ export default function Doorstep() {
           <div className="chips" role="group" aria-label="Wish radius">
             {[0.5, 1, 2, 5].map((r) => (
               <button key={r} className="chip" aria-pressed={newWish.radius === r} onClick={() => setNewWish((w) => ({ ...w, radius: r }))}>
-                {r === 0.5 ? "½ mile" : `${r} miles`}
+                {r === 0.5 ? "0.5 miles" : `${r} miles`}
               </button>
             ))}
           </div>
@@ -1551,7 +1551,7 @@ export default function Doorstep() {
               <b>{w.keyword || w.cat}</b>
               <small>
                 {w.cat !== "Anything" && w.keyword ? `${w.cat} · ` : ""}
-                within {w.radius === 0.5 ? "½ mile" : `${w.radius} miles`}
+                within {w.radius === 0.5 ? "0.5 miles" : `${w.radius} miles`}
                 {w.found > 0 ? ` · found ${w.found}` : ""}
               </small>
             </span>
@@ -1599,7 +1599,7 @@ export default function Doorstep() {
           </div>
           <div className="stat-tile">
             <b>{hood ? hood.kgCo2e : 0}</b>
-            <span>kg CO₂e avoided</span>
+            <span>kg CO2e avoided</span>
           </div>
           <div className="stat-tile">
             <b>£{hood ? hood.avoidedCost : 0}</b>
@@ -1629,7 +1629,7 @@ export default function Doorstep() {
 
         <p className="caveat">
           Weights are the Furniture Re-use Network averages published by Merseyside Recycling &amp; Waste
-          Authority. CO₂ uses Freegle's published 0.51 tonnes per tonne reused, from WRAP's Benefits of
+          Authority. CO2 uses Freegle's published 0.51 tonnes per tonne reused, from WRAP's Benefits of
           Reuse tool. Avoided cost uses WRAP's 2025-26 gate fees: £34 a tonne to landfill plus £126.15
           landfill tax.
         </p>
@@ -1915,7 +1915,7 @@ export default function Doorstep() {
                   )}
                 </div>
               )}
-              {autospec.busy && <p className="spec-status working">Reading the photo…</p>}
+              {autospec.busy && <p className="spec-status working">Reading the photo</p>}
               {autospec.done && !autospec.busy && <p className="spec-status">Filled in from your photo — change anything that's off.</p>}
               {give.photos.length > 0 && autospec.configured && !autospec.busy && (
                 <div className="photo-actions">
@@ -2031,7 +2031,7 @@ export default function Doorstep() {
               {giveErrors.confirm && <p className="field-note">{giveErrors.confirm}</p>}
 
               <button className="primary-btn" onClick={submitGive} disabled={busy}>
-                {busy ? "Listing…" : "Put it on the doorstep"}
+                {busy ? "Listing" : "Put it on the doorstep"}
               </button>
               {giveErrors._form && <p className="field-note form-note">{giveErrors._form}</p>}
             </main>
@@ -2055,52 +2055,18 @@ export default function Doorstep() {
               Doorstep <span className="wordmark-dot" />
             </div>
             <div className="topbar-actions">
-              <button className="icon-btn" aria-label="Map view" onClick={() => setScreen("map")}>
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z" />
-                  <circle cx="12" cy="10" r="2.5" />
-                </svg>
-              </button>
               <button
-                className="icon-btn"
-                aria-label="Your things"
+                className="give-top"
                 onClick={() => {
-                  if (needsAccount("Sign in to see your things", { action: "mine" })) return;
-                  setTab("toCollect");
-                  setScreen("mine");
+                  if (needsAccount("Sign in to give something away", { action: "give" })) return;
+                  setScreen("give");
                 }}
               >
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M5 8h14l-1.2 11.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z" />
-                  <path d="M9 8V6a3 3 0 0 1 6 0v2" />
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z" />
+                  <circle cx="12" cy="13" r="3.4" />
                 </svg>
-              </button>
-              <button
-                className="icon-btn bell"
-                aria-label={unread > 0 ? `Alerts, ${unread} new` : "Alerts"}
-                onClick={() => {
-                  if (needsAccount("Sign in and we'll tell you when something you want appears", { action: "wishes" })) return;
-                  setScreen("notifications");
-                }}
-              >
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M18 9a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16S18 14 18 9z" />
-                  <path d="M10.5 20a2 2 0 0 0 3 0" />
-                </svg>
-                {unread > 0 && <span className="bell-dot">{unread > 9 ? "9+" : unread}</span>}
-              </button>
-              <button
-                className="icon-btn"
-                aria-label="Your profile"
-                onClick={() => {
-                  if (needsAccount("Sign in to see your profile")) return;
-                  setScreen("profile");
-                }}
-              >
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <circle cx="12" cy="8" r="3.6" />
-                  <path d="M5.5 20a6.5 6.5 0 0 1 13 0" />
-                </svg>
+                Give
               </button>
               <button
                 className="place-btn"
@@ -2128,7 +2094,7 @@ export default function Doorstep() {
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search — bookcase, bike, pots…"
+                placeholder="Search bookcase, bike, pots"
                 aria-label="Search items"
               />
               {q && (
@@ -2138,6 +2104,7 @@ export default function Doorstep() {
               )}
             </div>
 
+            <div className="scroll-strip">
             <div className="chips" role="group" aria-label="Filter items">
               {CATEGORIES.map((c) => (
                 <button
@@ -2150,7 +2117,9 @@ export default function Doorstep() {
                 </button>
               ))}
             </div>
+            </div>
 
+            <div className="scroll-strip">
             <div className="controls-row">
               <div className="segment" role="group" aria-label="Sort order">
                 {[
@@ -2175,6 +2144,7 @@ export default function Doorstep() {
                   </button>
                 ))}
               </div>
+            </div>
             </div>
 
             {visible.length === 0 && (
@@ -2282,21 +2252,65 @@ export default function Doorstep() {
             })}
           </main>
 
-          <div className="give-bar">
+          <nav className="tabbar" aria-label="Main">
+            <button className="tabbar-btn" aria-current="page">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 10.5 12 3l9 7.5" />
+                <path d="M5.5 9.5V20h13V9.5" />
+              </svg>
+              Near you
+            </button>
+            <button className="tabbar-btn" onClick={() => setScreen("map")}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z" />
+                <circle cx="12" cy="10" r="2.5" />
+              </svg>
+              Map
+            </button>
             <button
-              className="give-btn"
+              className="tabbar-btn"
               onClick={() => {
-                if (needsAccount("Sign in to give something away", { action: "give" })) return;
-                setScreen("give");
+                if (needsAccount("Sign in to see your things", { action: "mine" })) return;
+                setTab("toCollect");
+                setScreen("mine");
               }}
             >
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z" />
-                <circle cx="12" cy="13" r="3.5" />
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M5 8h14l-1.2 11.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z" />
+                <path d="M9 8V6a3 3 0 0 1 6 0v2" />
               </svg>
-              Give something away
+              Yours
             </button>
-          </div>
+            <button
+              className="tabbar-btn"
+              onClick={() => {
+                if (needsAccount("Sign in and we'll tell you when something you want appears", { action: "wishes" })) return;
+                setScreen("notifications");
+              }}
+            >
+              <span className="tabbar-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M18 9a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16S18 14 18 9z" />
+                  <path d="M10.5 20a2 2 0 0 0 3 0" />
+                </svg>
+                {unread > 0 && <em>{unread > 9 ? "9+" : unread}</em>}
+              </span>
+              Alerts
+            </button>
+            <button
+              className="tabbar-btn"
+              onClick={() => {
+                if (needsAccount("Sign in to see your profile")) return;
+                setScreen("profile");
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="8" r="3.4" />
+                <path d="M5.5 20a6.5 6.5 0 0 1 13 0" />
+              </svg>
+              You
+            </button>
+          </nav>
         </div>
 
         {sheets}

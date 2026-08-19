@@ -259,7 +259,38 @@
 .topbar .wordmark { font-size: 20px; color: #FFF; gap: 7px; }
 .topbar .wordmark-dot { width: 9px; height: 9px; margin-top: 2px; }
 
-.topbar-actions { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.topbar-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+
+/* the main action lives in the header now, in signal yellow so it reads as
+   the one thing to do */
+.give-top {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--body);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--signal);
+  border: none;
+  border-radius: 20px;
+  padding: 8px 14px 8px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(20, 38, 31, 0.18);
+  transition: transform .08s, filter .15s;
+}
+
+.give-top:hover { filter: brightness(1.05); }
+.give-top:active { transform: translateY(1px); }
+
+.place-btn {
+  background: rgba(255, 255, 255, 0.14);
+  color: #FFF;
+  box-shadow: none;
+}
+
+.place-btn:hover { background: rgba(255, 255, 255, 0.24); }
 
 .icon-btn {
   width: 30px;
@@ -281,22 +312,25 @@
   font-size: 12.5px;
   font-weight: 500;
   letter-spacing: 0.06em;
-  color: var(--railing);
-  background: var(--signal);
-  border: none;
+  color: #FFF;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 20px;
-  padding: 6px 12px;
+  padding: 7px 13px;
   cursor: pointer;
   white-space: nowrap; /* "Sign in" was breaking across two lines */
   flex: none;
+  transition: background .15s;
 }
 
-.feed { flex: 1; padding: 22px 20px 110px; }
+.place-btn:hover { background: rgba(255, 255, 255, 0.26); }
+
+.feed { flex: 1; padding: 20px 18px 28px; }
 
 .feed-head {
   font-family: var(--display);
-  font-weight: 600;
-  font-size: 23px;
+  font-weight: 700;
+  font-size: 25px;
   letter-spacing: -0.02em;
   line-height: 1.2;
   margin: 0 0 4px;
@@ -307,17 +341,23 @@
 .search-row {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   background: var(--card);
-  border: 1.5px solid var(--rule);
-  border-radius: 10px;
-  padding: 10px 13px;
-  margin-bottom: 12px;
+  border: 1px solid var(--rule);
+  border-radius: 24px;
+  padding: 11px 16px;
+  margin-bottom: 14px;
   color: var(--hush);
-  transition: border-color .15s;
+  box-shadow: 0 1px 2px rgba(20, 38, 31, 0.04);
+  transition: border-color .15s, box-shadow .15s;
 }
 
-.search-row:focus-within { border-color: var(--railing); }
+.search-row svg { flex: none; }
+
+.search-row:focus-within {
+  border-color: var(--railing);
+  box-shadow: 0 0 0 3px rgba(35, 74, 59, 0.09);
+}
 
 .search-row input {
   flex: 1;
@@ -346,29 +386,34 @@
 .controls-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  margin-bottom: 14px;
+  margin: 0 -18px 16px;
+  padding: 2px 18px 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+
+.controls-row::-webkit-scrollbar { display: none; }
+.controls-row > * { flex: none; }
 
 .segment {
   display: flex;
   background: var(--card);
-  border: 1.5px solid var(--rule);
-  border-radius: 9px;
-  padding: 2px;
+  border: 1px solid var(--rule);
+  border-radius: 22px;
+  padding: 3px;
   gap: 2px;
 }
 
 .segment button {
   font-family: var(--body);
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--hush);
   background: none;
   border: none;
-  border-radius: 7px;
-  padding: 5px 9px;
+  border-radius: 18px;
+  padding: 6px 12px;
   cursor: pointer;
   white-space: nowrap;
   transition: background .12s, color .12s;
@@ -379,47 +424,94 @@
   color: #FFF;
 }
 
-.chips { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 16px; margin: 0 -20px 4px; padding-left: 20px; padding-right: 20px; scrollbar-width: none; }
+.chips {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  margin: 0 -18px 12px;
+  padding: 2px 18px 6px;
+  scrollbar-width: none;
+}
+
+.chips > * { flex: none; }
+
+/* the last chip should look cut off on purpose */
+.chips::after,
+.controls-row::after {
+  content: '';
+  flex: none;
+  width: 6px;
+}
+
+.scroll-strip {
+  position: relative;
+}
+
+.scroll-strip::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 6px;
+  width: 26px;
+  pointer-events: none;
+  background: linear-gradient(to right, rgba(229, 231, 223, 0), var(--render));
+}
 .chips::-webkit-scrollbar { display: none; }
 
 .chip {
   font-family: var(--body);
   font-size: 13.5px;
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
   color: var(--railing);
-  background: transparent;
-  border: 1.5px solid var(--rule);
-  border-radius: 18px;
-  padding: 7px 14px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 22px;
+  padding: 8px 15px;
   cursor: pointer;
-  transition: background .14s, border-color .14s, color .14s;
+  transition: background .14s, border-color .14s, color .14s, transform .1s;
 }
 
 .chip:hover { border-color: var(--railing); }
-.chip[aria-pressed="true"] { background: var(--railing); border-color: var(--railing); color: #FFF; }
+.chip:active { transform: scale(0.97); }
+
+.chip[aria-pressed="true"] {
+  background: var(--railing);
+  border-color: var(--railing);
+  color: #FFF;
+  box-shadow: 0 2px 8px rgba(35, 74, 59, 0.22);
+}
 
 .card {
   background: var(--card);
-  border-radius: 14px;
-  border: 1.5px solid var(--rule);
-  margin-bottom: 13px;
+  border-radius: 18px;
+  border: 1px solid var(--rule);
+  margin-bottom: 12px;
   overflow: hidden;
-  transition: border-color .2s;
   cursor: pointer;
+  box-shadow: 0 1px 2px rgba(20, 38, 31, 0.04);
+  transition: border-color .18s, box-shadow .18s, transform .12s;
 }
 
-.card:hover { border-color: #B6BDB4; }
+.card:hover {
+  border-color: #B6BDB4;
+  box-shadow: 0 6px 18px rgba(20, 38, 31, 0.09);
+  transform: translateY(-1px);
+}
+
+.card:active { transform: translateY(0); }
+.card.urgent { box-shadow: 0 2px 12px rgba(245, 197, 24, 0.22); }
 
 .card.urgent { border-color: var(--signal); }
 .card.taken { opacity: 0.55; }
 
-.card-body { display: flex; gap: 14px; padding: 14px; }
+.card-body { display: flex; gap: 13px; padding: 13px; }
 
 .thumb {
-  width: 86px; height: 86px;
+  width: 88px; height: 88px;
   flex: none;
-  border-radius: 10px;
+  border-radius: 14px;
   background: var(--render);
   display: flex;
   align-items: center;
@@ -468,17 +560,18 @@
 
 .card.urgent .meter-fill { background: var(--signal); }
 
-.card-action { display: flex; border-top: 1.5px solid var(--rule); }
+.card-action { display: flex; border-top: 1px solid var(--rule); }
 
 .claim-btn {
   flex: 1;
   font-family: var(--body);
   font-size: 14.5px;
   font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--railing);
   background: transparent;
   border: none;
-  padding: 13px;
+  padding: 14px;
   cursor: pointer;
   transition: background .14s;
 }
@@ -513,15 +606,15 @@
 .saved-toggle {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   font-family: var(--body);
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--hush);
   background: var(--card);
-  border: 1.5px solid var(--rule);
-  border-radius: 9px;
-  padding: 7px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 22px;
+  padding: 8px 13px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -564,7 +657,7 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: 10px;
+  border-radius: 14px;
 }
 
 .empty {
@@ -1477,12 +1570,61 @@
 .leaflet-popup-content-wrapper { border-radius: 10px; }
 .leaflet-popup-content { margin: 10px 12px; }
 
-.give-bar {
+.tabbar {
   position: sticky;
   bottom: 0;
-  padding: 14px 20px 22px;
-  padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px));
-  background: linear-gradient(to top, var(--render) 62%, rgba(229,231,223,0));
+  z-index: 25;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  background: var(--card);
+  border-top: 1px solid var(--rule);
+  padding: 8px 6px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -6px 20px rgba(20, 38, 31, 0.06);
+}
+
+.tabbar-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--body);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--hush);
+  background: none;
+  border: none;
+  border-radius: 12px;
+  padding: 7px 2px 5px;
+  cursor: pointer;
+  transition: color .14s, background .14s;
+}
+
+.tabbar-btn svg { width: 21px; height: 21px; }
+.tabbar-btn:hover { color: var(--railing); background: #F1F4EF; }
+.tabbar-btn[aria-current="page"] { color: var(--railing); }
+
+.tabbar-icon { position: relative; display: inline-flex; }
+
+.tabbar-icon em {
+  position: absolute;
+  top: -4px;
+  right: -7px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--signal);
+  color: var(--ink);
+  font-family: var(--meter);
+  font-style: normal;
+  font-size: 9.5px;
+  font-weight: 500;
+  line-height: 15px;
+  text-align: center;
 }
 
 .give-btn {
