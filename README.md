@@ -12,9 +12,11 @@ Two processes — the API and the web app:
 
 ```bash
 npm install
-npm run server   # API + SQLite on http://localhost:4000
+npm run server   # API on http://localhost:4000
 npm run dev      # web app on http://localhost:5173 (proxies /api to 4000)
 ```
+
+The API needs Postgres. You do not have to install one: with no `DATABASE_URL` set it runs [PGlite](https://pglite.dev) — real Postgres compiled to WebAssembly, in-process — so the same SQL runs locally, in the tests, and on Supabase. Set `PGLITE_DIR=server/.pgdata` if you want local data to survive a restart. Point `DATABASE_URL` at Supabase and it uses that instead.
 
 A demo account is seeded: `demo@doorstep.uk` / `doorstep123`. Eight listings across London Fields, Dalston and Stoke Newington are re-seeded with fresh windows every time the server starts, so the feed is never empty, plus a handful of already-collected items so the diversion figures aren't all zeros.
 
@@ -27,14 +29,14 @@ src/
   reset.css    minimal normalisation
   main.jsx     React root
 server/
-  index.js     Express API: auth, sessions, items, claims, strikes, alerts, SSE stream
-  db.js        SQLite schema (better-sqlite3), scrypt password hashing, London seed
+  index.js     Express API: auth, sessions, items, claims, strikes, wishes, SSE stream
+  db.js        Postgres schema and access, scrypt password hashing, London seed
   geo.js       postcodes.io geocoding (cached), haversine distance, pin fuzzing
   autospec.js  photo → structured listing draft via the Claude API (optional)
   impact.js    diversion reporting: items, weight, CO2e, avoided cost by postcode
 ```
 
-The database lives in `server/doorstep.db` (gitignored). Sessions are opaque bearer tokens stored server-side, so sign-out genuinely revokes them.
+The database is Postgres — Supabase in production, PGlite locally. Sessions are opaque bearer tokens stored server-side, so sign-out genuinely revokes them.
 
 ## Tests
 
@@ -42,7 +44,7 @@ The database lives in `server/doorstep.db` (gitignored). Sessions are opaque bea
 npm test
 ```
 
-Seventeen tests, no mocks: the API suite boots the real server against a throwaway SQLite file and exercises the rules that matter — a claim race between two neighbours, addresses staying hidden from everyone but the claimer, map pins staying snapped to the grid, unsafe items being refused, saved searches firing only on genuine matches, and collected items moving from the feed into the diversion figures. The geo tests cover distance, formatting and pin blurring.
+Forty tests, no mocks: the API suite boots the real server against a throwaway Postgres (PGlite) and exercises the rules that matter — a claim race between two neighbours, addresses staying hidden from everyone but the claimer, map pins staying snapped to the grid, unsafe items being refused, saved searches firing only on genuine matches, and collected items moving from the feed into the diversion figures. The geo tests cover distance, formatting and pin blurring.
 
 ## The API
 
@@ -125,15 +127,26 @@ Take advice on the waste-carrier question. If someone regularly collects items t
 
 Two pieces: the web app goes to Vercel, the API goes to Render.
 
+### Database — Supabase
+
+Create a project, then **Project Settings → Database → Connection string → URI**. Use the **Session pooler** URI on port **5432**, not the transaction pooler on 6543: claiming an item takes a `SELECT … FOR UPDATE` row lock so two neighbours tapping at the same instant cannot both win, and transaction pooling breaks that. Replace `[YOUR-PASSWORD]` with the real password.
+
+You do not need to create any tables. The API creates its own schema on first boot.
+
 ### API — Render
 
-Render dashboard → **New → Blueprint** → point it at this repo. `render.yaml` describes the service: `npm ci`, `npm run server`, health check on `/api/health`.
+Render dashboard → **New → Blueprint** → point it at this repo, or **New → Web Service** and fill in:
 
-**Read this before you pick a plan.** Render wipes the filesystem on every deploy and on every restart. The SQLite database is a file, so without a persistent disk every account, listing and claim disappears each time the service redeploys or wakes from sleep. `render.yaml` therefore mounts a 1 GB disk at `/var/data` and sets `DOORSTEP_DB=/var/data/doorstep.db`. A disk needs a paid instance; on the free tier, delete the `disk` block and accept that the deployment is a demo which re-seeds itself on boot.
+- Build command: `npm ci`
+- Start command: `npm run server`
+- Health check path: `/api/health`
+- Environment: `DATABASE_URL` (the Supabase URI) and `NODE_VERSION` = `22`
 
-Two more free-tier facts worth knowing: the service sleeps after about 15 minutes of inactivity and takes roughly a minute to wake, so the first request after a quiet spell is slow; and long-lived connections are cut, which means the live alerts stream reconnects rather than staying open. Neither matters for a demo. Both matter for real neighbours waiting on an alert.
+Do **not** add a Render Postgres or a disk. The database lives in Supabase, so this service holds no state and can sleep, restart or scale without losing anything.
 
-Optional: set `ANTHROPIC_API_KEY` in the Render dashboard to switch on drafting a listing from its photo. Without it the app quietly falls back to the manual form.
+On the free instance the service sleeps after about 15 minutes of inactivity and takes roughly a minute to wake, so the first request after a quiet spell is slow; long-lived connections are also cut, which means the live alerts stream reconnects rather than staying open. Neither matters for a demo. Both matter for real neighbours waiting on an alert.
+
+Optional: set `ANTHROPIC_API_KEY` to switch on drafting a listing from its photo. Without it the app quietly falls back to the manual form.
 
 ### Web app — Vercel
 

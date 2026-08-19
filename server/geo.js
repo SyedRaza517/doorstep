@@ -1,4 +1,4 @@
-import { db } from "./db.js";
+import { query, one } from "./db.js";
 
 /* London Fields — the launch neighbourhood's centre, used only when
    postcodes.io is unreachable at signup time */
@@ -21,14 +21,14 @@ export function formatMiles(mi) {
   return `${Math.round(mi)} mi`;
 }
 
-/* Free UK postcode geocoding, cached in SQLite so each postcode hits
+/* Free UK postcode geocoding, cached in the database so each postcode hits
    the network once. Returns:
    { ok: true, lat, lng }            — geocoded
    { ok: false, reason: "invalid" }  — postcodes.io says it doesn't exist
    { ok: false, reason: "offline" }  — network/API failure, caller decides */
 export async function geocodePostcode(postcode) {
-  const clean = postcode.trim().toUpperCase().replace(/\s+/g, "");
-  const cached = db.prepare("SELECT lat, lng FROM postcode_cache WHERE postcode = ?").get(clean);
+  const clean = String(postcode).trim().toUpperCase().replace(/\s+/g, "");
+  const cached = await one("SELECT lat, lng FROM postcode_cache WHERE postcode = $1", [clean]);
   if (cached) return { ok: true, lat: cached.lat, lng: cached.lng };
 
   try {
@@ -38,7 +38,11 @@ export async function geocodePostcode(postcode) {
     const data = await res.json();
     const lat = data.result.latitude;
     const lng = data.result.longitude;
-    db.prepare("INSERT OR REPLACE INTO postcode_cache (postcode, lat, lng) VALUES (?, ?, ?)").run(clean, lat, lng);
+    await query(
+      `INSERT INTO postcode_cache (postcode, lat, lng) VALUES ($1,$2,$3)
+       ON CONFLICT (postcode) DO UPDATE SET lat = EXCLUDED.lat, lng = EXCLUDED.lng`,
+      [clean, lat, lng]
+    );
     return { ok: true, lat, lng };
   } catch {
     return { ok: false, reason: "offline" };

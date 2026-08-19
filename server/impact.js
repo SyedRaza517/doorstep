@@ -1,4 +1,4 @@
-import { db } from "./db.js";
+import { query } from "./db.js";
 
 /* Diversion reporting — the thing councils actually buy. Essex County Council
    funds Freegle in exchange for exactly this: items, tonnage, CO2 and avoided
@@ -49,13 +49,13 @@ const round = (n, dp = 1) => {
   return Math.round(n * f) / f;
 };
 
-export function impactFor({ userId = null, since = 0 } = {}) {
+export async function impactFor({ userId = null, since = 0 } = {}) {
   const where = userId
-    ? "collected_at IS NOT NULL AND collected_at > ? AND (owner_id = ? OR claimed_by = ?)"
-    : "collected_at IS NOT NULL AND collected_at > ?";
-  const params = userId ? [since, userId, userId] : [since];
+    ? "collected_at IS NOT NULL AND collected_at > $1 AND (owner_id = $2 OR claimed_by = $2)"
+    : "collected_at IS NOT NULL AND collected_at > $1";
+  const params = userId ? [since, userId] : [since];
 
-  const rows = db.prepare(`SELECT cat, postcode FROM items WHERE ${where}`).all(...params);
+  const rows = await query(`SELECT cat, postcode FROM items WHERE ${where}`, params);
 
   let kg = 0;
   const byDistrict = new Map();

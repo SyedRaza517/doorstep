@@ -8,7 +8,10 @@ import path from "node:path";
 
 const PORT = 4123;
 const BASE = `http://127.0.0.1:${PORT}/api`;
-const dbFile = path.join(os.tmpdir(), `doorstep-test-${process.pid}.db`);
+/* Each run gets its own PGlite directory — a real Postgres, in-process, so
+   the tests exercise the same SQL that Supabase will. Set DATABASE_URL to
+   point the suite at a real Postgres instead. */
+const dbDir = path.join(os.tmpdir(), `doorstep-test-${process.pid}`);
 const serverPath = fileURLToPath(new URL("../index.js", import.meta.url));
 
 let server;
@@ -40,27 +43,25 @@ const newNeighbour = async (name) =>
 
 before(async () => {
   server = spawn(process.execPath, [serverPath], {
-    env: { ...process.env, DOORSTEP_DB: dbFile, PORT: String(PORT) },
+    env: { ...process.env, PGLITE_DIR: dbDir, PORT: String(PORT) },
     stdio: "ignore",
   });
-  for (let i = 0; i < 60; i++) {
+  /* PGlite has to boot Postgres in WASM and run the schema, so allow longer */
+  for (let i = 0; i < 160; i++) {
     try {
-      await fetch(`${BASE}/me`);
-      return;
-    } catch {
-      await new Promise((r) => setTimeout(r, 250));
-    }
+      const res = await fetch(`${BASE}/health`);
+      if (res.ok) return;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 250));
   }
   throw new Error("test server never came up");
 });
 
 after(() => {
   server.kill();
-  for (const suffix of ["", "-wal", "-shm"]) {
-    try {
-      fs.unlinkSync(dbFile + suffix);
-    } catch {}
-  }
+  try {
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  } catch {}
 });
 
 test("the seeded demo account signs in and a wrong password does not", async () => {

@@ -2,31 +2,27 @@
 #
 # Deploy: Render dashboard → New → Blueprint → point at this repo.
 #
-# The disk matters. Render wipes the filesystem on every deploy and restart,
-# so without it the SQLite database — accounts, listings, claims — is gone
-# each time the service redeploys or wakes from sleep. The disk keeps it.
-# A disk requires a paid instance type; on the free tier, drop the `disk`
-# block and treat the deployment as a demo that re-seeds itself on boot.
+# There is deliberately no Render Postgres and no disk here: the database
+# lives in Supabase, so this service is stateless and can restart, sleep or
+# scale without losing anything. Set DATABASE_URL to the Supabase connection
+# string — use the Session pooler (port 5432) URI, which supports the
+# transactions and row locks the claim flow relies on.
 services:
   - type: web
     name: doorstep-api
     runtime: node
-    plan: starter
+    plan: free
     region: frankfurt # closest to a London launch
     buildCommand: npm ci
     startCommand: npm run server
     healthCheckPath: /api/health
     autoDeploy: true
-    disk:
-      name: doorstep-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: "22"
-      # keeps the database on the persistent disk rather than the container
-      - key: DOORSTEP_DB
-        value: /var/data/doorstep.db
+      # Supabase → Project Settings → Database → Connection string → URI
+      - key: DATABASE_URL
+        sync: false
       # optional: switches on drafting a listing from its photo
       - key: ANTHROPIC_API_KEY
         sync: false

@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 
-/* geo.js pulls in db.js, so point that at a throwaway file */
-process.env.DOORSTEP_DB = path.join(os.tmpdir(), `doorstep-geo-${process.pid}.db`);
+/* geo.js pulls in db.js; these tests only touch the pure maths, so an
+   in-memory PGlite is never even connected to. */
+process.env.PGLITE_DIR = path.join(os.tmpdir(), `doorstep-geo-${process.pid}`);
 
 const { milesBetween, formatMiles, approxCoords } = await import("../geo.js");
 
