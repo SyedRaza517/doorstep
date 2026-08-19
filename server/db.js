@@ -324,6 +324,15 @@ CREATE TABLE IF NOT EXISTS blocks (
   PRIMARY KEY (blocker_id, blocked_id)
 );
 
+/* The Vinted pattern: follow a neighbour whose taste you trust, and hear the
+   moment they list something new — trust in a person rather than a keyword. */
+CREATE TABLE IF NOT EXISTS follows (
+  follower_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  giver_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at  BIGINT NOT NULL,
+  PRIMARY KEY (follower_id, giver_id)
+);
+
 CREATE TABLE IF NOT EXISTS reports (
   id          BIGSERIAL PRIMARY KEY,
   item_id     BIGINT NOT NULL REFERENCES items(id) ON DELETE CASCADE,

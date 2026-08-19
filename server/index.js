@@ -351,6 +351,39 @@ async function wishersFor(item, ownerId) {
   return wishes.filter((w) => wishMatches(w, item) != null).length;
 }
 
+/* ---- follows ---- */
+
+/* Someone listed something: tell the neighbours who follow them. This is the
+   Vinted pattern — trust in a person's taste rather than a keyword — so it
+   fires on every listing, with no radius or category filter. Anyone the wish
+   system has already told about this item is skipped (wish_told remembers),
+   because nobody should hear the same doorbell twice. */
+async function notifyFollowers(item, giver) {
+  const followers = await query(
+    `SELECT u.id, u.lat, u.lng FROM follows f JOIN users u ON u.id = f.follower_id
+     WHERE f.giver_id = $1
+       AND u.id NOT IN (SELECT user_id FROM wish_told WHERE item_id = $2)
+       AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = $1)
+       AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = $1)`,
+    [giver.id, item.id]
+  );
+  const firstName = String(giver.name).split(/\s+/)[0];
+  const now = Date.now();
+  for (const f of followers) {
+    /* distance is a courtesy, not a filter — omitted when either side lacks coordinates */
+    const miles = f.lat != null && item.lat != null ? milesBetween(f.lat, f.lng, item.lat, item.lng) : null;
+    const body =
+      miles != null
+        ? `${firstName} just listed this — you follow their giveaways. ${formatMiles(miles)} away on ${item.road}.`
+        : `${firstName} just listed this — you follow their giveaways.`;
+    const row = await one(
+      "INSERT INTO notifications (user_id, item_id, title, body, created_at) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+      [f.id, item.id, item.title, body, now]
+    );
+    pushTo(num(f.id), { type: "alert", id: num(row.id), itemId: num(item.id), title: item.title, body, createdAt: now });
+  }
+}
+
 /* ---- auth middleware ---- */
 
 const auth = wrap(async (req, res, next) => {
@@ -413,19 +446,25 @@ async function startSession(user) {
 async function itemContext(items, user) {
   const ownerIds = [...new Set(items.map((i) => Number(i.owner_id)))];
   const itemIds = items.map((i) => Number(i.id));
-  if (!ownerIds.length) return { givers: new Map(), saved: new Set() };
+  if (!ownerIds.length) return { givers: new Map(), saved: new Set(), following: new Set() };
 
   const givers = await query(
     `SELECT u.id, u.name, u.lat, u.postcode,
             (SELECT COUNT(*) FROM items i WHERE i.owner_id = u.id AND i.collected_at IS NOT NULL) AS handed,
             (SELECT COUNT(*) FROM ratings r WHERE r.ratee_id = u.id) AS rated,
-            (SELECT AVG(stars) FROM ratings r WHERE r.ratee_id = u.id) AS stars
+            (SELECT AVG(stars) FROM ratings r WHERE r.ratee_id = u.id) AS stars,
+            (SELECT COUNT(*) FROM follows f WHERE f.giver_id = u.id) AS followers
      FROM users u WHERE u.id = ANY($1::bigint[])`,
     [ownerIds]
   );
   const saved = itemIds.length
     ? await query("SELECT item_id FROM saves WHERE user_id = $1 AND item_id = ANY($2::bigint[])", [user.id, itemIds])
     : [];
+  /* who this viewer follows, fetched once for the page like saves */
+  const followed = await query("SELECT giver_id FROM follows WHERE follower_id = $1 AND giver_id = ANY($2::bigint[])", [
+    user.id,
+    ownerIds,
+  ]);
   const hands = itemIds.length
     ? await query("SELECT item_id, user_id FROM claim_requests WHERE item_id = ANY($1::bigint[])", [itemIds])
     : [];
@@ -449,10 +488,12 @@ async function itemContext(items, user) {
           /* an average of one review is an anecdote; three is a signal */
           stars: num(g.rated) >= 3 ? Math.round(Number(g.stars) * 10) / 10 : null,
           rated: num(g.rated),
+          followers: num(g.followers),
         },
       ])
     ),
     saved: new Set(saved.map((s) => num(s.item_id))),
+    following: new Set(followed.map((f) => num(f.giver_id))),
     handsUp,
     handCounts,
   };
@@ -523,7 +564,9 @@ function publicItem(it, user, now, ctx) {
     owner,
     lat: pin ? pin.lat : null,
     lng: pin ? pin.lng : null,
-    giver: ctx.givers.get(it.owner_id) || null,
+    giver: ctx.givers.has(it.owner_id)
+      ? { ...ctx.givers.get(it.owner_id), following: ctx.following.has(num(it.owner_id)) }
+      : null,
     saved: ctx.saved.has(it.id),
     windowMs: it.window_ms,
     expiresAt: it.expires_at,
@@ -1142,6 +1185,10 @@ app.post(
 
     const item = castItem(row);
     const wishers = isAsk ? 0 : await notifyMatchingWishes(item, req.user.id);
+    /* followers hear about giveaways, never asks — they signed up for this
+       person's cast-offs, not their shopping list. Runs after the wish pass
+       so wish_told already records who has been told once. */
+    if (!isAsk) await notifyFollowers(item, req.user);
     res.status(201).json({ ...(await publicOne(item, req.user, now)), wishers });
   })
 );
@@ -2146,6 +2193,41 @@ app.get(
   })
 );
 
+/* ---- following a giver ----
+   The Vinted pattern: follow a neighbour whose taste you trust, and be told
+   the moment they list something new. A block in either direction closes the
+   door — following someone who blocked you would be a way around the block. */
+
+app.post(
+  "/api/givers/:id/follow",
+  auth,
+  wrap(async (req, res) => {
+    const target = Number(req.params.id);
+    if (target === req.user.id) return fail(res, 400, "You can't follow yourself — you already know what's on your doorstep");
+    if (!(await one("SELECT id FROM users WHERE id = $1", [target]))) return fail(res, 404, "No such neighbour");
+    const wall = await one(
+      "SELECT 1 AS x FROM blocks WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1)",
+      [req.user.id, target]
+    );
+    if (wall) return fail(res, 403, "You can't follow this neighbour");
+    await query("INSERT INTO follows (follower_id, giver_id, created_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [
+      req.user.id,
+      target,
+      Date.now(),
+    ]);
+    res.json({ ok: true, following: true });
+  })
+);
+
+app.delete(
+  "/api/givers/:id/follow",
+  auth,
+  wrap(async (req, res) => {
+    await query("DELETE FROM follows WHERE follower_id = $1 AND giver_id = $2", [req.user.id, req.params.id]);
+    res.json({ ok: true, following: false });
+  })
+);
+
 /* ---- your data ----
    UK GDPR: people can take their data out and have their account erased.
    Olio keeps listings and ratings after deletion for its impact accounting;
@@ -2211,6 +2293,7 @@ app.delete(
       await q("DELETE FROM notifications WHERE user_id = $1", [id]);
       await q("DELETE FROM saves WHERE user_id = $1", [id]);
       await q("DELETE FROM blocks WHERE blocker_id = $1 OR blocked_id = $1", [id]);
+      await q("DELETE FROM follows WHERE follower_id = $1 OR giver_id = $1", [id]);
       await q("DELETE FROM sessions WHERE user_id = $1", [id]);
       await q(
         "UPDATE users SET name = 'Former neighbour', email = $1, postcode = '', lat = NULL, lng = NULL, address = NULL, road = NULL, password_hash = $2 WHERE id = $3",

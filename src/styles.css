@@ -3451,3 +3451,210 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
   cursor: pointer;
 }
 .want-give:active { transform: scale(0.96); }
+/* ---------- slide to collect ---------- */
+/* The handover gesture on the detail page. The track sits where the old
+   "mark as collected" button did, so it inherits the same width and rhythm.
+   touch-action: none is what stops the page scrolling under a thumb-drag on
+   touch screens — without it the browser steals vertical pans mid-slide. */
+.slide-collect {
+  position: relative;
+  width: 100%;
+  height: 54px;
+  border-radius: 999px;
+  background: var(--render);
+  border: 1px solid var(--rule);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+}
+
+.slide-collect-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--body);
+  font-weight: 600;
+  font-size: 14.5px;
+  color: var(--railing);
+  pointer-events: none;
+}
+
+.slide-collect-thumb {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  background: var(--signal);
+  color: var(--railing);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  box-shadow: 0 1px 4px rgba(20, 30, 25, 0.22);
+  /* The spring-back home after an abandoned drag. While actively dragging the
+     transition is switched off so the thumb tracks the finger exactly. */
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.3, 1.1);
+}
+.slide-collect-thumb.dragging { transition: none; cursor: grabbing; }
+.slide-collect-thumb:focus-visible { outline: 2px solid var(--railing); outline-offset: 2px; }
+
+/* Once confirmed the whole track goes quietly green while the handler's own
+   refresh catches up — a receipt, not a celebration. */
+.slide-collect.done { background: var(--railing); border-color: var(--railing); }
+.slide-collect.done .slide-collect-label { color: #FFF; }
+.slide-collect.done .slide-collect-thumb { background: #FFF; color: var(--railing); }
+
+/* Motion-sensitive users get an instant snap instead of the spring. */
+@media (prefers-reduced-motion: reduce) {
+  .slide-collect-thumb { transition: none; }
+}
+
+/* ---------- first-run intro carousel ---------- */
+/* The pitch a brand-new guest sees once. The slides live in a horizontal
+   scroll-snap rail rather than a stacked deck because the swipe IS the
+   affordance — a thumb discovers the next slide without being told. */
+
+.intro-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--render);
+}
+
+/* sits above the rail so a slide's artwork can never swallow the tap */
+.intro-skip {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 2;
+  background: none;
+  border: none;
+  padding: 10px 12px;
+  font-family: var(--body);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--hush);
+  cursor: pointer;
+}
+.intro-skip:hover { color: var(--ink); }
+
+.intro-rail {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.intro-rail::-webkit-scrollbar { display: none; }
+
+/* each slide takes the full rail width, so the page itself never grows
+   sideways — all the horizontal travel happens inside the rail */
+.intro-slide {
+  flex: none;
+  width: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 30px 28px 12px;
+}
+
+.intro-art {
+  width: min(230px, 62%);
+  height: auto;
+  margin-bottom: 26px;
+}
+
+.intro-slide h2 {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 25px;
+  line-height: 1.14;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 0 0 10px;
+  max-width: 300px;
+}
+
+.intro-slide p {
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--hush);
+  margin: 0;
+  max-width: 290px;
+}
+
+.intro-foot { padding: 4px 22px 22px; }
+
+.intro-dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 2px 0 16px;
+}
+
+/* the dots are buttons, not marks: a tap jumps straight to that slide */
+.intro-dots button {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  border: none;
+  padding: 0;
+  background: var(--rule);
+  cursor: pointer;
+  transition: width .2s, background .2s;
+}
+.intro-dots button.here {
+  width: 22px;
+  background: var(--railing);
+}
+
+/* Next stays quiet so the solid green moment belongs to the final CTA —
+   the only slide where we are actually asking for anything */
+.intro-next.quiet {
+  background: transparent;
+  color: var(--railing);
+  border: 1.5px solid var(--railing);
+  padding: 13.5px 15px;
+}
+.intro-next.quiet:hover:not(:disabled) {
+  background: rgba(35, 74, 59, 0.08);
+}
+
+/* ---------- following a giver ---------- */
+/* A compact pill on the giver card: outlined green while you're just looking,
+   filled green with signal yellow once you've decided their taste is worth
+   hearing about. Sits flush right so the giver's own lines keep their room. */
+.follow-btn {
+  margin-left: auto;
+  flex: none;
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: 1.5px solid var(--railing);
+  background: transparent;
+  color: var(--railing);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.follow-btn.following {
+  background: var(--railing);
+  color: var(--signal);
+}

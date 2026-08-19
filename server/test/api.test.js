@@ -1296,3 +1296,51 @@ test("the demand radar reads the wish list backwards, counts only", async () => 
   assert.equal(gram.count, 2, "two reachable wishers, casing folded, the far one excluded");
   assert.ok(!JSON.stringify(radar.body).match(/Wisher One|Wisher Two/), "counts only, never who");
 });
+
+test("following a giver rings the bell for their next listing, and only while followed", async () => {
+  const giver = await newNeighbour("Prolific Giver");
+  const follower = await newNeighbour("Faithful Follower");
+  const giverId = (await call("/me", { token: giver })).body.user.id;
+
+  /* following yourself is nonsense — you already know what's on your doorstep */
+  const selfie = await call(`/givers/${giverId}/follow`, { method: "POST", token: giver });
+  assert.equal(selfie.status, 400);
+
+  const followed = await call(`/givers/${giverId}/follow`, { method: "POST", token: follower });
+  assert.equal(followed.status, 200);
+  assert.equal(followed.body.following, true);
+
+  const listed = await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Rattan magazine rack", cat: "Furniture", road: "Test Road, E8", address: "85 Test Road, London E8 3EP" },
+  });
+  assert.equal(listed.status, 201);
+
+  const notes = await call("/notifications", { token: follower });
+  assert.ok(
+    notes.body.notifications.some((n) => /you follow/.test(n.body)),
+    "the follower should hear the moment their giver lists"
+  );
+
+  /* the giver card carries the relationship, so the button knows its state */
+  const feed = await call("/items?q=rattan", { token: follower });
+  const it = feed.body.items.find((i) => i.id === listed.body.id);
+  assert.equal(it.giver.following, true);
+  assert.ok(it.giver.followers >= 1, "the follower count is on the card");
+
+  /* unfollow, and the next listing passes in silence */
+  const unfollowed = await call(`/givers/${giverId}/follow`, { method: "DELETE", token: follower });
+  assert.equal(unfollowed.body.following, false);
+  await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Rattan plant stand", cat: "Furniture", road: "Test Road, E8", address: "85 Test Road, London E8 3EP" },
+  });
+  const again = await call("/notifications", { token: follower });
+  assert.equal(
+    again.body.notifications.filter((n) => /you follow/.test(n.body)).length,
+    1,
+    "no second bell after unfollowing"
+  );
+});

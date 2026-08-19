@@ -230,6 +230,100 @@ const SubScreen = ({ title, time, toast, sheets, onBack, children }) => (
   </div>
 );
 
+/* The handover gesture. A tap is too easy to fire by accident while someone is
+   juggling a sofa cushion on a doorstep, so confirming collection asks for a
+   deliberate slide — the same idea Too Good To Go uses at the counter. Pointer
+   events cover mouse and touch alike, and setPointerCapture keeps the drag
+   alive even when the finger wanders off the thumb. Keyboard users shouldn't
+   have to mime a drag, so Enter or Space on the thumb confirms directly.
+   Defined at module scope for the same remount reason as SubScreen above. */
+const SlideToCollect = ({ onConfirm }) => {
+  const trackRef = useRef(null);
+  /* Where the pointer started relative to the thumb's current offset, so a
+     grab mid-track doesn't make the thumb jump under the finger. */
+  const grabRef = useRef(0);
+  /* The handler must only ever fire once, even if pointer events keep
+     arriving after the threshold — a ref survives the same-tick re-renders
+     that state wouldn't. */
+  const firedRef = useRef(false);
+  const [x, setX] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  /* the ref is the truth, the state only styles: a fast swipe can land its
+     first moves before React commits the state, and those must not be lost */
+  const draggingRef = useRef(false);
+  const [done, setDone] = useState(false);
+
+  /* The distance the thumb can travel: track width minus its own diameter and
+     the 3px inset each side. Measured on demand rather than cached, because
+     the phone frame can resize while the sheet is open. */
+  const travel = () => (trackRef.current ? trackRef.current.clientWidth - 48 - 6 : 0);
+
+  const confirm = () => {
+    if (firedRef.current) return;
+    firedRef.current = true;
+    setDone(true);
+    draggingRef.current = false;
+    setDragging(false);
+    setX(travel());
+    /* The brief green "Collected ✓" state shows immediately; the handler's own
+       refresh replaces this screen shortly after, so no timer is needed. */
+    onConfirm();
+  };
+
+  const down = (e) => {
+    if (firedRef.current) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    grabRef.current = e.clientX - x;
+    draggingRef.current = true;
+    setDragging(true);
+  };
+  const move = (e) => {
+    if (!draggingRef.current || firedRef.current) return;
+    const max = travel();
+    const next = Math.min(max, Math.max(0, e.clientX - grabRef.current));
+    /* Crossing 85% of the way is commitment enough — snap home and fire. */
+    if (max > 0 && next >= max * 0.85) confirm();
+    else setX(next);
+  };
+  const up = () => {
+    if (firedRef.current) return;
+    draggingRef.current = false;
+    setDragging(false);
+    /* Released short of the threshold: spring back. The transition lives in
+       CSS so prefers-reduced-motion can make it instant. */
+    setX(0);
+  };
+  const key = (e) => {
+    /* Accessibility beats theatre: a keyboard press confirms outright. The
+       preventDefault stops Space scrolling the feed behind the control. */
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      confirm();
+    }
+  };
+
+  return (
+    <div className={done ? "slide-collect done" : "slide-collect"} ref={trackRef}>
+      <span className="slide-collect-label">{done ? "Collected ✓" : "Slide to confirm collection"}</span>
+      <button
+        type="button"
+        className={dragging ? "slide-collect-thumb dragging" : "slide-collect-thumb"}
+        style={{ transform: `translateX(${x}px)` }}
+        aria-label="Slide to confirm collection"
+        onPointerDown={down}
+        onPointerMove={move}
+        onPointerUp={up}
+        onPointerCancel={up}
+        onKeyDown={key}
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M9 6l6 6-6 6" />
+        </svg>
+      </button>
+    </div>
+  );
+};
+
 const CATEGORIES = ["Going soonest", "Furniture", "Kids", "Garden", "Electricals"];
 /* `kind` is the drawn glyph used when a listing has no picture; `pic` is the
    illustration that stands for the whole category in the shortcut row. */
@@ -394,6 +488,71 @@ const REPORT_REASONS = [
 
 const UPHOLSTERY_RE = /sofa|armchair|settee|couch|mattress|futon|upholster/i;
 
+/* The three-slide pitch a brand-new guest sees once. The drawings are flat
+   and geometric in the app's own few colours rather than photographs,
+   because a photo promises a particular sofa and we can only promise the
+   neighbourhood. */
+const INTRO_SLIDES = [
+  {
+    head: "Your neighbours are giving things away, right now",
+    sub: "Furniture, food, plants, kids' kit — free, and minutes away on foot.",
+    art: (
+      <svg className="intro-art" viewBox="0 0 220 170" aria-hidden="true">
+        <circle cx="110" cy="85" r="72" fill="#FFFFFF" />
+        <circle cx="54" cy="42" r="8" fill="#F5C518" />
+        <rect x="88" y="30" width="64" height="88" rx="6" fill="#234A3B" />
+        <rect x="98" y="42" width="44" height="26" rx="3" fill="#2E5F4B" />
+        <rect x="98" y="76" width="44" height="32" rx="3" fill="#2E5F4B" />
+        <circle cx="145" cy="76" r="4" fill="#F5C518" />
+        <rect x="80" y="118" width="80" height="10" rx="3" fill="#CDD2C9" />
+        <rect x="42" y="128" width="136" height="10" rx="3" fill="#CDD2C9" />
+        <path d="M38 98 L28 87 L48 91 Z" fill="#A64B2A" opacity="0.65" />
+        <path d="M78 98 L88 87 L68 91 Z" fill="#A64B2A" opacity="0.65" />
+        <rect x="38" y="98" width="40" height="30" rx="3" fill="#A64B2A" />
+        <rect x="55" y="98" width="7" height="30" fill="#F5C518" />
+        <path d="M58 98 C56 82 64 72 76 68 C76 80 70 92 58 98 Z" fill="#2E5F4B" />
+      </svg>
+    ),
+  },
+  {
+    head: "Claim it, then collect from the doorstep",
+    sub: "No chat needed. The exact address appears the moment it's yours.",
+    art: (
+      <svg className="intro-art" viewBox="0 0 220 170" aria-hidden="true">
+        <circle cx="110" cy="85" r="72" fill="#FFFFFF" />
+        <path d="M48 132 H172" stroke="#CDD2C9" strokeWidth="4" strokeLinecap="round" strokeDasharray="1 12" />
+        <circle cx="84" cy="44" r="11" fill="#234A3B" />
+        <path d="M84 60 V92" stroke="#234A3B" strokeWidth="13" strokeLinecap="round" />
+        <path d="M84 90 L66 128" stroke="#234A3B" strokeWidth="8" strokeLinecap="round" />
+        <path d="M84 90 L102 112 L106 130" stroke="#234A3B" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        <path d="M84 66 L100 82" stroke="#234A3B" strokeWidth="7" strokeLinecap="round" />
+        <path d="M84 66 L68 84" stroke="#234A3B" strokeWidth="7" strokeLinecap="round" />
+        <path d="M120 70 H148" stroke="#F5C518" strokeWidth="9" strokeLinecap="round" />
+        <path d="M144 58 L160 70 L144 82" stroke="#F5C518" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        <rect x="146" y="104" width="22" height="28" rx="3" fill="#A64B2A" />
+        <circle cx="163" cy="118" r="2.5" fill="#F5C518" />
+      </svg>
+    ),
+  },
+  {
+    head: "Nothing good goes to waste in Hackney",
+    sub: "Every collection is one thing that never became bin lorry cargo.",
+    art: (
+      <svg className="intro-art" viewBox="0 0 220 170" aria-hidden="true">
+        <circle cx="110" cy="85" r="72" fill="#FFFFFF" />
+        <circle cx="156" cy="48" r="6" fill="#F5C518" />
+        <path d="M110 135 A50 50 0 0 1 110 35" stroke="#234A3B" strokeWidth="8" fill="none" strokeLinecap="round" />
+        <path d="M110 35 A50 50 0 0 1 110 135" stroke="#234A3B" strokeWidth="8" fill="none" strokeLinecap="round" />
+        <path d="M110 26 L126 35 L110 44 Z" fill="#234A3B" />
+        <path d="M110 126 L94 135 L110 144 Z" fill="#234A3B" />
+        <path d="M96 58 C118 62 130 84 118 106 C96 102 86 78 96 58 Z" fill="#2E5F4B" />
+        <path d="M100 66 C106 80 110 92 114 104" stroke="#E5E7DF" strokeWidth="3" fill="none" strokeLinecap="round" />
+        <path d="M116 108 C112 118 108 124 106 130" stroke="#2E5F4B" strokeWidth="4" fill="none" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+];
+
 function useClock() {
   const [, tick] = useState(0);
   useEffect(() => {
@@ -423,8 +582,18 @@ export default function Doorstep() {
   const [user, setUser] = useState(null);
   /* Browsing needs no account: the app opens on the feed and only asks who
      you are at the moment you try to claim or give something. A sign-up wall
-     in front of an empty-handed visitor is the surest way to lose them. */
-  const [screen, setScreen] = useState(token ? "loading" : "home");
+     in front of an empty-handed visitor is the surest way to lose them.
+     The one exception is a guest we have never met at all — they get the
+     three-slide pitch once, because the feed only sells itself to someone
+     who already knows the things on it are free and around the corner. */
+  const [screen, setScreen] = useState(() => {
+    if (token) return "loading";
+    return localStorage.getItem("ds_seen_intro") ? "home" : "intro";
+  });
+  /* which pitch slide is in view, and the rail itself so the Next button
+     and the dots can drive the scroll rather than duplicate it */
+  const [introSlide, setIntroSlide] = useState(0);
+  const introRail = useRef(null);
   const [pending, setPending] = useState(null);
   const [authReason, setAuthReason] = useState(null);
   const [mode, setMode] = useState("signup");
@@ -1014,6 +1183,26 @@ export default function Doorstep() {
     }
   };
 
+  /* Follow a giver whose taste you trust — the button flips optimistically on
+     every card they own, and quietly flips back if the server disagrees. */
+  const toggleFollow = async (item) => {
+    if (needsAccount("Sign in to follow this giver")) return;
+    const giverId = item.giver.id;
+    const next = !item.giver.following;
+    const flip = (val) => (list) =>
+      list.map((i) =>
+        i.giver && i.giver.id === giverId
+          ? { ...i, giver: { ...i.giver, following: val, followers: Math.max(0, (i.giver.followers || 0) + (val ? 1 : -1)) } }
+          : i
+      );
+    setItems(flip(next));
+    try {
+      await api(`/givers/${giverId}/follow`, { method: next ? "POST" : "DELETE", token });
+    } catch {
+      setItems(flip(!next));
+    }
+  };
+
   const sendThanks = async (item, kind) => {
     setThanking(null);
     try {
@@ -1556,6 +1745,75 @@ export default function Doorstep() {
     </>
   );
 
+  /* ---------------- first-run pitch ---------------- */
+
+  if (screen === "intro") {
+    /* Leaving by any exit counts as having seen the pitch — skip, the final
+       CTA, it makes no difference — because a pitch only lands on someone
+       who has never met the app, and showing it twice spends goodwill. */
+    const finishIntro = () => {
+      localStorage.setItem("ds_seen_intro", "1");
+      setScreen("home");
+    };
+    const goToSlide = (i) => {
+      const rail = introRail.current;
+      if (rail) rail.scrollTo({ left: i * rail.clientWidth, behavior: "smooth" });
+    };
+    const onLast = introSlide === INTRO_SLIDES.length - 1;
+    return (
+      <div className="ds-root">
+        <div className="ds-phone on-auth">
+          <StatusBar time={timeNow} />
+          <div className="ds-frame">
+            <div className="intro-wrap">
+              <button className="intro-skip" onClick={finishIntro}>
+                Skip
+              </button>
+              <div
+                className="intro-rail"
+                data-carousel="intro"
+                ref={introRail}
+                onScroll={(e) => {
+                  /* the scroller itself is the source of truth for the dots,
+                     so a thumb-swipe and a Next tap can never disagree */
+                  const el = e.currentTarget;
+                  setIntroSlide(Math.max(0, Math.min(INTRO_SLIDES.length - 1, Math.round(el.scrollLeft / el.clientWidth))));
+                }}
+              >
+                {INTRO_SLIDES.map((s, i) => (
+                  <section key={s.head} className="intro-slide" aria-label={`Slide ${i + 1} of ${INTRO_SLIDES.length}`}>
+                    {s.art}
+                    <h2>{s.head}</h2>
+                    <p>{s.sub}</p>
+                  </section>
+                ))}
+              </div>
+              <div className="intro-foot">
+                <div className="intro-dots">
+                  {INTRO_SLIDES.map((s, i) => (
+                    <button
+                      key={s.head}
+                      className={i === introSlide ? "here" : ""}
+                      aria-label={`Go to slide ${i + 1}`}
+                      aria-current={i === introSlide}
+                      onClick={() => goToSlide(i)}
+                    />
+                  ))}
+                </div>
+                <button
+                  className={`primary-btn intro-next ${onLast ? "" : "quiet"}`}
+                  onClick={() => (onLast ? finishIntro() : goToSlide(introSlide + 1))}
+                >
+                  {onLast ? "Show me what's going" : "Next"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   /* ---------------- restoring session ---------------- */
 
   if (screen === "loading") {
@@ -1986,6 +2244,13 @@ export default function Doorstep() {
                         </em>
                       )}
                     </span>
+                    <button
+                      className={`follow-btn${item.giver.following ? " following" : ""}`}
+                      aria-pressed={Boolean(item.giver.following)}
+                      onClick={() => toggleFollow(item)}
+                    >
+                      {item.giver.following ? "Following ✓" : "Follow"}
+                    </button>
                   </div>
                 )}
 
@@ -2125,9 +2390,8 @@ export default function Doorstep() {
                 )}
                 {mine && (
                   <>
-                    <button className="primary-btn collected-btn" onClick={() => collected(item)}>
-                      Got it — mark as collected
-                    </button>
+                    {/* Keyed by item so a fresh claim always starts with the thumb at rest. */}
+                    <SlideToCollect key={item.id} onConfirm={() => collected(item)} />
                     <button className="ghost-btn" onClick={() => openChatForItem(item.id)}>
                       Message {item.giver ? item.giver.name : "the giver"}
                     </button>
@@ -2149,42 +2413,64 @@ export default function Doorstep() {
                 </p>
 
                 {(() => {
-                  const also = items
-                    .filter((i) => i.id !== item.id && i.expiresAt > now && i.status !== "taken" && !i.owner)
+                  const live = items.filter((i) => i.id !== item.id && i.expiresAt > now && i.status !== "taken" && !i.owner);
+                  /* Everything else this giver has live right now. Seeing a
+                     giver's other listings turns one collection trip into two,
+                     which is why this rail sits above the general one. */
+                  const fromGiver = live
+                    .filter((i) => i.giver && item.giver && i.giver.id === item.giver.id)
+                    .sort((a, b) => a.expiresAt - b.expiresAt)
+                    .slice(0, 4);
+                  const giverIds = new Set(fromGiver.map((i) => i.id));
+                  /* The general rail must not repeat anything already shown in
+                     the giver rail, or the page looks like it's stuttering. */
+                  const also = live
+                    .filter((i) => !giverIds.has(i.id))
                     .sort((a, b) => (a.cat === item.cat ? -1 : 1) - (b.cat === item.cat ? -1 : 1) || a.expiresAt - b.expiresAt)
                     .slice(0, 4);
-                  if (!also.length) return null;
+                  /* Both rails share the same gcard so the styling stays in step. */
+                  const rail = (list) =>
+                    list.map((a) => (
+                      <article
+                        key={a.id}
+                        className="gcard"
+                        onClick={() => {
+                          setDetailId(a.id);
+                          setShot(0);
+                        }}
+                      >
+                        <div className="gcard-photo">
+                          {pictureOf(a) ? (
+                            <img src={pictureOf(a)} alt="" loading="lazy" />
+                          ) : (
+                            <span className="gcard-glyph">
+                              <Glyph kind={a.kind} size={44} />
+                            </span>
+                          )}
+                          <span className="gcard-timer">{formatLeft(a.expiresAt - now)}</span>
+                        </div>
+                        <div className="gcard-copy">
+                          <b>{a.title}</b>
+                          <span>{[a.dist, a.road].filter(Boolean).join(" · ")}</span>
+                        </div>
+                      </article>
+                    ));
+                  if (!fromGiver.length && !also.length) return null;
                   return (
-                    <div className="also">
-                      <p className="sub-head">Also going near you</p>
-                      <div className="item-grid">
-                        {also.map((a) => (
-                          <article
-                            key={a.id}
-                            className="gcard"
-                            onClick={() => {
-                              setDetailId(a.id);
-                              setShot(0);
-                            }}
-                          >
-                            <div className="gcard-photo">
-                              {pictureOf(a) ? (
-                                <img src={pictureOf(a)} alt="" loading="lazy" />
-                              ) : (
-                                <span className="gcard-glyph">
-                                  <Glyph kind={a.kind} size={44} />
-                                </span>
-                              )}
-                              <span className="gcard-timer">{formatLeft(a.expiresAt - now)}</span>
-                            </div>
-                            <div className="gcard-copy">
-                              <b>{a.title}</b>
-                              <span>{[a.dist, a.road].filter(Boolean).join(" · ")}</span>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    </div>
+                    <>
+                      {fromGiver.length > 0 && (
+                        <div className="also">
+                          <p className="sub-head">More from {item.giver.name.split(" ")[0]}</p>
+                          <div className="item-grid">{rail(fromGiver)}</div>
+                        </div>
+                      )}
+                      {also.length > 0 && (
+                        <div className="also">
+                          <p className="sub-head">Also going near you</p>
+                          <div className="item-grid">{rail(also)}</div>
+                        </div>
+                      )}
+                    </>
                   );
                 })()}
 
