@@ -27,3 +27,9 @@ Thumbs.db
 
 # scratch
 screenshots/debug*.png
+
+# Signing keys never belong in the repository
+*.jks
+*.keystore
+*.p12
+keystore.properties
