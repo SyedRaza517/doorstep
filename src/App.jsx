@@ -19,7 +19,8 @@ async function api(path, { method = "GET", body, token } = {}) {
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch {
-    throw Object.assign(new Error("Can't reach the server — is it running?"), { status: 0 });
+    /* hosted APIs sleep and wake, so this is often just a cold start */
+    throw Object.assign(new Error("Can't reach Doorstep just now — try again in a moment."), { status: 0 });
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(data.error || "Something went wrong"), { status: res.status, field: data.field });

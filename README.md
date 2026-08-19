@@ -121,6 +121,45 @@ The whole product depends on never encouraging that behaviour. It's stated on th
 
 Take advice on the waste-carrier question. If someone regularly collects items to resell they may need a waste carrier registration, and a household that hands waste to an unregistered carrier can be liable. Keep the framing as goods being given between neighbours, not waste being disposed of — that distinction is legally load-bearing.
 
+## Deploying
+
+Two pieces: the web app goes to Vercel, the API goes to Render.
+
+### API — Render
+
+Render dashboard → **New → Blueprint** → point it at this repo. `render.yaml` describes the service: `npm ci`, `npm run server`, health check on `/api/health`.
+
+**Read this before you pick a plan.** Render wipes the filesystem on every deploy and on every restart. The SQLite database is a file, so without a persistent disk every account, listing and claim disappears each time the service redeploys or wakes from sleep. `render.yaml` therefore mounts a 1 GB disk at `/var/data` and sets `DOORSTEP_DB=/var/data/doorstep.db`. A disk needs a paid instance; on the free tier, delete the `disk` block and accept that the deployment is a demo which re-seeds itself on boot.
+
+Two more free-tier facts worth knowing: the service sleeps after about 15 minutes of inactivity and takes roughly a minute to wake, so the first request after a quiet spell is slow; and long-lived connections are cut, which means the live alerts stream reconnects rather than staying open. Neither matters for a demo. Both matter for real neighbours waiting on an alert.
+
+Optional: set `ANTHROPIC_API_KEY` in the Render dashboard to switch on drafting a listing from its photo. Without it the app quietly falls back to the manual form.
+
+### Web app — Vercel
+
+Import the repo. `vercel.json` already sets the framework, the build and the SPA rewrite, so the only thing to add is one environment variable:
+
+```
+VITE_API_URL = https://<your-render-service>.onrender.com/api
+```
+
+It is read at build time, not at run time, so **changing it means redeploying**, not just saving it. Leave it unset and the app calls `/api` on its own origin, which is right for local development and wrong on Vercel.
+
+### After both are up
+
+```bash
+curl https://<your-render-service>.onrender.com/api/health
+```
+
+should return `{"ok":true,...}`. Then sign in on the Vercel URL with the seeded demo account. The API allows any origin — every route is bearer-token authenticated rather than cookie based, so the web app, the Android app and the iOS app can all call it.
+
+To point the phone apps at the hosted API instead of a machine on your LAN:
+
+```bash
+VITE_API_URL=https://<your-render-service>.onrender.com/api npm run build
+npx cap sync
+```
+
 ## Mobile apps (Capacitor)
 
 The same codebase ships as native Android and iOS apps via [Capacitor](https://capacitorjs.com). The web build in `dist/` is wrapped in a native shell; the `android/` and `ios/` folders are the native projects and are committed as source.

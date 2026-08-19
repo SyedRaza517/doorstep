@@ -27,5 +27,8 @@
     "@capacitor/assets": "^3.0.5",
     "@vitejs/plugin-react": "^4.3.4",
     "vite": "^5.4.11"
+  },
+  "engines": {
+    "node": ">=20 <23"
   }
 }

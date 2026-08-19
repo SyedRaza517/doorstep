@@ -26,7 +26,9 @@ seedCollectedHistory();
 const app = express();
 app.use(express.json({ limit: "3mb" })); /* room for one resized item photo */
 
-/* permissive CORS so the Capacitor apps (capacitor:// / https origins) can call in */
+/* The web app (Vercel), the Android app (capacitor://) and the iOS app all
+   call this from a different origin, and every route is bearer-token
+   authenticated rather than cookie based, so a wildcard is safe here. */
 app.use((req, res, next) => {
   res.set("Access-Control-Allow-Origin", "*");
   res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -36,6 +38,12 @@ app.use((req, res, next) => {
 });
 
 const fail = (res, status, error, field) => res.status(status).json({ error, ...(field ? { field } : {}) });
+
+/* Render pings this to decide whether the service is alive, and it is the
+   quickest way to tell a browser the API is reachable. */
+app.get("/api/health", (req, res) => {
+  res.json({ ok: true, service: "doorstep-api", time: new Date().toISOString() });
+});
 
 /* ---- live notification stream ----
    One-way server→client at small scale, so Server-Sent Events rather than a
