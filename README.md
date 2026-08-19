@@ -2,7 +2,7 @@
 
 Neighbour-to-neighbour giveaway app, launching in London (London Fields first). Photograph something you're finished with, it gets listed for a short window, a neighbour claims it in one tap and collects it from your doorstep, porch, garden or lobby — never the pavement.
 
-Sign up, sign in, the home feed (search, distance sort, radius filter), a map view with approximate pins, item detail, the camera listing flow, and claim/collect mechanics — all backed by a real API and database with genuine London geography (postcodes.io).
+Sign up (with a real address picker), a home feed under a proper masthead (search with live suggestions, distance sort, custom radius), a map with photo pins, item detail with a sticky claim dock, the camera listing flow, claim/collect with a 30-minute hold, an arrangement thread per claim, two-way star ratings, wish lists with instant alerts, public asks, follows, badges, and the three mechanics nobody else has — last orders, rain checks and first dibs — all backed by a real API and database with genuine London geography (postcodes.io).
 
 The London competitor analysis and launch strategy that shaped the current feature set lives in the "Doorstep in London" artifact (eight research streams: Olio, Freegle/Freecycle/Trash Nothing, Marketplace/Gumtree/Nextdoor, London reuse landscape, monetization, UK legal, launch playbooks, seed data).
 
@@ -18,7 +18,7 @@ npm run dev      # web app on http://localhost:5173 (proxies /api to 4000)
 
 The API needs Postgres. You do not have to install one: with no `DATABASE_URL` set it runs [PGlite](https://pglite.dev) — real Postgres compiled to WebAssembly, in-process — so the same SQL runs locally, in the tests, and on Supabase. Set `PGLITE_DIR=server/.pgdata` if you want local data to survive a restart. Point `DATABASE_URL` at Supabase and it uses that instead.
 
-A demo account is seeded: `demo@doorstep.uk` / `doorstep123`. Eight listings across London Fields, Dalston and Stoke Newington are re-seeded with fresh windows every time the server starts, so the feed is never empty, plus a handful of already-collected items so the diversion figures aren't all zeros.
+A demo account is seeded: `demo@doorstep.uk` / `doorstep123`. Two hundred listings across twenty real Hackney roads are re-seeded with fresh windows every time the server starts — food and non-food, full descriptions and details, real pictures — plus recent collections for the "Just gone" strip, live asks, and history so the personal screens and diversion figures are never empty.
 
 ## What's here
 
@@ -44,7 +44,7 @@ The database is Postgres — Supabase in production, PGlite locally. Sessions ar
 npm test
 ```
 
-Forty tests, no mocks: the API suite boots the real server against a throwaway Postgres (PGlite) and exercises the rules that matter — a claim race between two neighbours, addresses staying hidden from everyone but the claimer, map pins staying snapped to the grid, unsafe items being refused, saved searches firing only on genuine matches, and collected items moving from the feed into the diversion figures. The geo tests cover distance, formatting and pin blurring.
+Sixty-nine tests and counting, no mocks: the API suite boots the real server against a throwaway Postgres (PGlite) and exercises the rules that matter — a claim race between two neighbours, addresses staying hidden from everyone but the claimer, map pins staying snapped to the grid, unsafe items being refused, saved searches firing only on genuine matches, and collected items moving from the feed into the diversion figures. The geo tests cover distance, formatting and pin blurring.
 
 ## The API
 
@@ -104,7 +104,7 @@ The whole product depends on never encouraging that behaviour. It's stated on th
 
 **The feed sorts by time remaining, not distance.** This is the opposite of every marketplace and it's correct here: an item 0.2 miles away with four minutes left is less useful than one half a mile away with ninety.
 
-**Claiming has no messaging.** One tap, a 30-minute hold, address released. The most common complaint about Facebook Marketplace and Gumtree giveaways is no-shows and endless back-and-forth. Resisting the urge to add chat is the differentiator — don't let this grow into a messaging feature.
+**Messaging exists only where a claim does.** Every claim opens exactly one arrangement thread, and the app itself writes the milestones into it — claimed (with where to go), handed back, collected — so the thread is the errand's own record. No thread exists without a claim behind it; there are no cold DMs, no social feed. That constraint is the differentiator: the back-and-forth that plagues Marketplace giveaways has nowhere to live here.
 
 ## Not built yet
 
@@ -112,12 +112,12 @@ The whole product depends on never encouraging that behaviour. It's stated on th
 2. **Verified weight and CO2 factors.** `server/impact.js` uses placeholder constants — only the avoided-cost figure is grounded (Hackney's £15 per five bulky items). Replace them with WRAP's published reuse weights and CO2e factors before any figure is shown to a council or the public. The file says so in a comment; keep it that way until it's true.
 3. **Charity booking as a real integration.** The fallback screen links out to BHF, Emmaus and Traid booking pages. Booking inside the app, with the collection tracked against the listing, is what makes the council reporting complete.
 4. **Address verification.** Nextdoor's residency check is why its giveaways feel safe. Today "verified" only means the postcode geocoded — a postcard code or bank check would make the badge mean what people will read into it.
-5. **Photo storage.** Photos are base64 in SQLite, which is fine for a prototype and wrong for scale. Move to object storage with signed URLs.
+5. **Photo storage.** Photos are data URLs in Postgres, served by reference with immutable caching — fine at launch scale, wrong at real scale. Move to object storage with signed URLs.
 
 ## Known issues
 
 - **The 30-minute hold is swept lazily**, on read. If nobody opens the app, a lapsed claim isn't recorded until someone does. Fine at this size; needs a timer or a cron job when volume grows.
-- **The seed re-runs on every server start**, wiping and re-listing the eight demo items. Real listings from other accounts survive, but don't build anything that assumes seed IDs are stable.
+- **The seed re-runs on every server start**, wiping and re-listing the demo catalogue. Real listings from other accounts survive, but don't build anything that assumes seed IDs are stable.
 
 ## Before launch
 
