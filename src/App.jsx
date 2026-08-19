@@ -455,6 +455,13 @@ export default function Doorstep() {
   const [fallback, setFallback] = useState(null);
   const [recent, setRecent] = useState([]);
   const goneStrip = useRef(null);
+  /* the arrangement threads: the list, the open one, and what's unread */
+  const [chats, setChats] = useState([]);
+  const [chatUnread, setChatUnread] = useState(0);
+  const [chatId, setChatId] = useState(null);
+  const [thread, setThread] = useState(null);
+  const [draft, setDraft] = useState("");
+  const chatEnd = useRef(null);
   const [reporting, setReporting] = useState(null);
   const [editing, setEditing] = useState(null);
   const [shot, setShot] = useState(0);
@@ -595,6 +602,18 @@ export default function Doorstep() {
       } catch {
         return;
       }
+      if (msg.type === "message") {
+        /* if that very thread is open, the words just appear; anywhere else
+           the messages badge ticks up and a toast passes by */
+        setChatUnread((n) => n + 1);
+        api("/chats", { token }).then((d) => { setChats(d.chats); setChatUnread(d.unread); }).catch(() => {});
+        if (screenRef.current === "chat" && chatIdRef.current) {
+          api(`/chats/${chatIdRef.current}`, { token }).then(setThread).catch(() => {});
+        } else {
+          setToast(msg.body.length > 60 ? `${msg.body.slice(0, 60)}…` : msg.body);
+        }
+        return;
+      }
       if (msg.type !== "alert") return;
       setNotes((list) => [{ id: msg.id, itemId: msg.itemId, title: msg.title, body: msg.body, createdAt: msg.createdAt, read: false }, ...list]);
       setUnread((n) => n + 1);
@@ -604,6 +623,17 @@ export default function Doorstep() {
     return () => es.close();
   }, [token, user, fetchItems]);
 
+  /* the newest words are the reason you're here */
+  useEffect(() => {
+    if (screen === "chat" && chatEnd.current) chatEnd.current.scrollIntoView({ block: "end" });
+  }, [screen, thread]);
+
+  /* the SSE closure outlives renders, so it reads these instead of state */
+  const screenRef = useRef(screen);
+  const chatIdRef = useRef(chatId);
+  useEffect(() => { screenRef.current = screen; }, [screen]);
+  useEffect(() => { chatIdRef.current = chatId; }, [chatId]);
+
   /* unread count on sign-in */
   useEffect(() => {
     if (!token || !user) return;
@@ -611,6 +641,12 @@ export default function Doorstep() {
       .then((d) => {
         setNotes(d.notifications);
         setUnread(d.unread);
+      })
+      .catch(() => {});
+    api("/chats", { token })
+      .then((d) => {
+        setChats(d.chats);
+        setChatUnread(d.unread);
       })
       .catch(() => {});
   }, [token, user]);
@@ -628,6 +664,14 @@ export default function Doorstep() {
       api("/wishes", { token }).then((d) => setWishes(d.wishes)).catch(() => {});
     }
     if (screen === "impact") api("/impact", { token }).then(setImpact).catch(() => {});
+    if (screen === "chats") api("/chats", { token }).then((d) => { setChats(d.chats); setChatUnread(d.unread); }).catch(() => {});
+    if (screen === "chat" && chatId) {
+      api(`/chats/${chatId}`, { token }).then((d) => {
+        setThread(d);
+        /* opening it read it, so the badge can let go of those */
+        api("/chats", { token }).then((x) => setChatUnread(x.unread)).catch(() => {});
+      }).catch(() => {});
+    }
     if (screen === "profile") api("/blocks", { token }).then((d) => setBlocked(d.blocked)).catch(() => {});
     if (screen === "give") {
       api("/autospec/status", { token }).then((d) => setAutospec((a) => ({ ...a, configured: d.configured }))).catch(() => {});
@@ -647,10 +691,10 @@ export default function Doorstep() {
       setNotes((list) => list.map((n) => ({ ...n, read: true })));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, token, tab]);
+  }, [screen, token, tab, chatId]);
 
   /* the feed refreshes for guests too */
-  const browsing = ["home", "map", "detail", "give", "profile", "notifications", "wishes", "impact", "fallback", "mine"].includes(screen);
+  const browsing = ["home", "map", "detail", "give", "profile", "notifications", "wishes", "impact", "fallback", "mine", "chats", "chat"].includes(screen);
   useEffect(() => {
     if (!browsing) return;
     /* a map with only the first page of pins would look half empty */
@@ -1298,6 +1342,24 @@ export default function Doorstep() {
     }
   };
 
+  /* straight from an item to its conversation, wherever you are */
+  const openChatForItem = async (itemId) => {
+    try {
+      const d = await api("/chats", { token });
+      setChats(d.chats);
+      setChatUnread(d.unread);
+      const c = d.chats.find((x) => x.itemId === itemId);
+      if (c) {
+        setChatId(c.id);
+        setScreen("chat");
+      } else {
+        setScreen("chats");
+      }
+    } catch {
+      setScreen("chats");
+    }
+  };
+
   const removeWish = async (id) => {
     setWishes((list) => list.filter((w) => w.id !== id));
     api(`/wishes/${id}`, { method: "DELETE", token }).catch(() => {});
@@ -1862,6 +1924,12 @@ export default function Doorstep() {
                     <span className="giver-lines">
                       <b>{item.giver.name}</b>
                       <small>
+                        {item.giver.stars != null && (
+                          <span className="giver-stars">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z" /></svg>
+                            {item.giver.stars} ({item.giver.rated}) ·{" "}
+                          </span>
+                        )}
                         {item.giver.handed > 0
                           ? `${item.giver.handed} thing${item.giver.handed === 1 ? "" : "s"} handed over`
                           : "New to the neighbourhood"}
@@ -1916,10 +1984,18 @@ export default function Doorstep() {
                     <button className="primary-btn collected-btn" onClick={() => collected(item)}>
                       Got it — mark as collected
                     </button>
+                    <button className="ghost-btn" onClick={() => openChatForItem(item.id)}>
+                      Message {item.giver ? item.giver.name : "the giver"}
+                    </button>
                     <button className="ghost-btn" onClick={() => release(item)}>
                       Can't make it — hand it back
                     </button>
                   </>
+                )}
+                {item.owner && item.status === "taken" && (
+                  <button className="ghost-btn" onClick={() => openChatForItem(item.id)}>
+                    Message the collector
+                  </button>
                 )}
 
                 <p className="detail-rule">
@@ -2123,9 +2199,25 @@ export default function Doorstep() {
                         Open
                       </button>
                     ) : it.state === "expired" ? (
-                      <button className="quiet" onClick={() => openFallback(it)}>
-                        What now?
-                      </button>
+                      <>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await api(`/items/${it.id}/relist`, { method: "POST", token });
+                              setToast("Back up for another window. Wishers have been told.");
+                              api("/me/stuff", { token }).then(setStuff).catch(() => {});
+                              refresh();
+                            } catch (e) {
+                              setToast(e.message);
+                            }
+                          }}
+                        >
+                          Put it back up
+                        </button>
+                        <button className="quiet" onClick={() => openFallback(it)}>
+                          What now?
+                        </button>
+                      </>
                     ) : null}
                   </div>
                 </div>
@@ -2183,6 +2275,151 @@ export default function Doorstep() {
         <button className="ghost-btn" onClick={() => setScreen("wishes")}>
           Manage your wish list
         </button>
+      </SubScreen>
+    );
+  }
+
+  /* ---------------- messages ---------------- */
+
+  if (screen === "chats") {
+    return (
+      <SubScreen title="Messages" time={timeNow} toast={toast} onBack={() => setScreen("home")}>
+        {chats.length === 0 && (
+          <div className="wish-empty">
+            <img src={`${API}/photos/armchair`} alt="" />
+            <b>No conversations yet</b>
+            <span>Claim something, or have something claimed, and the thread to arrange the handover starts itself.</span>
+          </div>
+        )}
+        {chats.map((c) => (
+          <button
+            key={c.id}
+            className={`chat-row ${c.unread > 0 ? "unread" : ""}`}
+            onClick={() => {
+              setChatId(c.id);
+              setScreen("chat");
+            }}
+          >
+            <span className="chat-pic">
+              {c.photoRef || c.photo ? (
+                <img src={c.photo || `${API}/photos/${c.photoRef}`} alt="" loading="lazy" />
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 8h14l-1.2 11.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z" /><path d="M9 8V6a3 3 0 0 1 6 0v2" /></svg>
+              )}
+            </span>
+            <span className="chat-lines">
+              <b>
+                {c.title}
+                <em>{c.role === "giving" ? ` · to ${c.with}` : ` · from ${c.with}`}</em>
+              </b>
+              <small>{c.lastBody.length > 64 ? `${c.lastBody.slice(0, 64)}…` : c.lastBody}</small>
+            </span>
+            <span className="chat-side">
+              <small>{agoLabel(Math.max(1, Math.round((Date.now() - c.lastAt) / 60000)))}</small>
+              {c.unread > 0 && <i className="chat-dot">{c.unread}</i>}
+            </span>
+          </button>
+        ))}
+      </SubScreen>
+    );
+  }
+
+  if (screen === "chat") {
+    const sendMsg = async (text) => {
+      const body = (text || draft).trim();
+      if (!body || !thread) return;
+      setDraft("");
+      /* optimistic: the words appear as they're said */
+      setThread((t) => ({ ...t, messages: [...t.messages, { id: `tmp-${Date.now()}`, mine: true, body, createdAt: Date.now() }] }));
+      try {
+        await api(`/chats/${thread.id}`, { method: "POST", token, body: { body } });
+      } catch (e) {
+        setToast(e.message);
+      }
+    };
+    const QUICK = thread && thread.role === "collecting"
+      ? ["On my way now", "Running 10 minutes late — still coming", "Which house number is it?", "Got it — thank you!"]
+      : ["It's outside the front door", "No rush — it'll be there", "Buzz flat when you arrive", "Glad it's going to a good home"];
+
+    return (
+      <SubScreen
+        title={thread ? `${thread.with} · ${thread.title.length > 18 ? `${thread.title.slice(0, 18)}…` : thread.title}` : "Messages"}
+        time={timeNow}
+        toast={toast}
+        onBack={() => {
+          setScreen("chats");
+          setThread(null);
+          setChatId(null);
+        }}
+      >
+        {thread && (
+          <div className="chat-thread">
+            {thread.address && (
+              <p className="chat-address">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0z" /><circle cx="12" cy="10" r="3" /></svg>
+                {thread.address}
+              </p>
+            )}
+
+            <div className="chat-scroll">
+              {thread.messages.map((m) =>
+                m.system ? (
+                  <p key={m.id} className="msg-system">{m.body}</p>
+                ) : (
+                  <p key={m.id} className={`msg ${m.mine ? "mine" : ""}`}>{m.body}</p>
+                )
+              )}
+              <span ref={chatEnd} />
+            </div>
+
+            {thread.canRate && (
+              <div className="rate-strip">
+                <b>How did the handover go?</b>
+                <span className="rate-stars">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button
+                      key={n}
+                      aria-label={`${n} star${n === 1 ? "" : "s"}`}
+                      onClick={async () => {
+                        try {
+                          await api(`/items/${thread.itemId}/rate`, { method: "POST", token, body: { stars: n } });
+                          setThread((t) => ({ ...t, canRate: false }));
+                          setToast(n >= 4 ? "Stars given. Good neighbours get known." : "Noted — thanks for being honest.");
+                        } catch (e) {
+                          setToast(e.message);
+                        }
+                      }}
+                    >
+                      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z" /></svg>
+                    </button>
+                  ))}
+                </span>
+              </div>
+            )}
+
+            <div className="quick-row">
+              {QUICK.map((qr) => (
+                <button key={qr} className="quick-chip" onClick={() => sendMsg(qr)}>
+                  {qr}
+                </button>
+              ))}
+            </div>
+
+            <div className="composer">
+              <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && sendMsg()}
+                placeholder="Message…"
+                aria-label="Message"
+                maxLength={500}
+              />
+              <button className="send-btn" aria-label="Send" disabled={!draft.trim()} onClick={() => sendMsg()}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2L11 13" /><path d="M22 2l-7 20-4-9-9-4z" /></svg>
+              </button>
+            </div>
+          </div>
+        )}
       </SubScreen>
     );
   }
@@ -2384,6 +2621,16 @@ export default function Doorstep() {
               </div>
 
               <div className="profile-links">
+                <button onClick={() => setScreen("chats")}>
+                  <span className="link-ic" aria-hidden="true">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+                  </span>
+                  <span className="link-copy">
+                    Messages
+                    <span>Arrange handovers with your neighbours</span>
+                  </span>
+                  {chatUnread > 0 ? <span className="link-badge">{chatUnread > 9 ? "9+" : chatUnread}</span> : <span className="link-go" aria-hidden="true">›</span>}
+                </button>
                 <button onClick={() => { setTab("toCollect"); setScreen("mine"); }}>
                   <span className="link-ic" aria-hidden="true">
                     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 8h14l-1.2 11.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z" /><path d="M9 8V6a3 3 0 0 1 6 0v2" /></svg>
@@ -2415,6 +2662,27 @@ export default function Doorstep() {
                   <span className="link-go" aria-hidden="true">›</span>
                 </button>
               </div>
+
+              <button
+                className={`away-toggle ${user && user.away ? "on" : ""}`}
+                onClick={async () => {
+                  const next = !(user && user.away);
+                  try {
+                    await api("/me", { method: "PATCH", token, body: { away: next } });
+                    setUser((u) => ({ ...u, away: next }));
+                    setToast(next ? "Away mode on — your listings are hidden until you're back." : "Welcome back — your listings are visible again.");
+                    refresh();
+                  } catch (e) {
+                    setToast(e.message);
+                  }
+                }}
+              >
+                <span className="link-copy">
+                  Away mode
+                  <span>{user && user.away ? "On — your listings are hidden" : "Hide your listings while you're away"}</span>
+                </span>
+                <span className={`switch ${user && user.away ? "on" : ""}`} aria-hidden="true" />
+              </button>
 
               {blocked.length > 0 && (
                 <div className="blocked-list">
@@ -3021,7 +3289,7 @@ export default function Doorstep() {
               ))}
             </div>
 
-            <div className="scroll-strip">
+            <div className="scroll-strip" data-carousel="controls">
             <div className="controls-row">
               <div className="segment" role="group" aria-label="Sort order">
                 {[

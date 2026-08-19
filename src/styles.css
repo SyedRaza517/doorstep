@@ -3041,3 +3041,260 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
 /* the hero meets the top bar with no beige seam */
 .on-home .feed.profile { padding-top: 0; }
 .profile-hero { margin: 0 -18px 18px; width: calc(100% + 36px); }
+
+/* ---------- messages ----------
+   A thread exists to arrange one handover, so it looks like an errand, not
+   a social feed: the address pinned on top, the milestones written by the
+   app down the middle, quick replies for the sentences everyone types. */
+
+.chat-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  padding: 11px 12px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  font-family: var(--body);
+}
+.chat-row.unread { border-left: 4px solid var(--signal); }
+.chat-pic {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--render);
+  color: var(--railing);
+  display: grid;
+  place-items: center;
+}
+.chat-pic img { width: 100%; height: 100%; object-fit: cover; }
+.chat-lines { flex: 1; min-width: 0; }
+.chat-lines b {
+  display: block;
+  font-size: 14px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-lines b em { font-style: normal; font-weight: 400; color: var(--hush); }
+.chat-lines small {
+  display: block;
+  font-size: 12.5px;
+  color: var(--hush);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+.chat-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.chat-side small { font-family: var(--meter); font-size: 10.5px; color: rgba(35, 74, 59, 0.45); }
+.chat-dot {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 19px;
+  height: 19px;
+  border-radius: 10px;
+  background: var(--signal);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  padding: 0 5px;
+}
+
+.chat-thread { display: flex; flex-direction: column; min-height: calc(100% - 8px); }
+.chat-address {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  background: rgba(245, 197, 24, 0.16);
+  border: 1px solid rgba(245, 197, 24, 0.4);
+  border-radius: 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--railing);
+}
+.chat-scroll { flex: 1; display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; }
+
+.msg {
+  max-width: 78%;
+  margin: 0;
+  padding: 9px 13px;
+  font-size: 14px;
+  line-height: 1.45;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 16px 16px 16px 5px;
+  align-self: flex-start;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.msg.mine {
+  background: var(--railing);
+  border-color: var(--railing);
+  color: #F7F5EC;
+  border-radius: 16px 16px 5px 16px;
+  align-self: flex-end;
+}
+.msg-system {
+  align-self: center;
+  margin: 2px 0;
+  max-width: 90%;
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: rgba(35, 74, 59, 0.55);
+}
+
+.quick-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 -18px 10px;
+  padding: 2px 18px;
+}
+.quick-row::-webkit-scrollbar { display: none; }
+.quick-chip {
+  flex: none;
+  font-family: var(--body);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--railing);
+  background: var(--card);
+  border: 1px solid rgba(35, 74, 59, 0.2);
+  border-radius: 999px;
+  padding: 8px 13px;
+  cursor: pointer;
+}
+.quick-chip:active { transform: scale(0.96); }
+
+.composer {
+  position: sticky;
+  bottom: 8px;
+  display: flex;
+  gap: 8px;
+  background: var(--card);
+  border: 1px solid rgba(35, 74, 59, 0.16);
+  border-radius: 999px;
+  padding: 6px 6px 6px 16px;
+  box-shadow: 0 8px 24px rgba(15, 30, 24, 0.16);
+}
+.composer input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--body);
+  font-size: 14.5px;
+  color: var(--ink);
+}
+.send-btn {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: var(--railing);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.send-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* stars, right where the handover ended */
+.rate-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 14px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+}
+.rate-strip b { font-size: 13.5px; color: var(--ink); }
+.rate-stars { display: flex; gap: 4px; }
+.rate-stars button {
+  border: none;
+  background: transparent;
+  color: var(--signal);
+  cursor: pointer;
+  padding: 2px;
+}
+.rate-stars button:hover svg, .rate-stars button:focus-visible svg { fill: currentColor; }
+.giver-stars { color: var(--railing); font-weight: 600; }
+.giver-stars svg { vertical-align: -1px; color: var(--signal); margin-right: 2px; }
+
+/* unread count riding a profile row */
+.link-badge {
+  flex: none;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 11px;
+  background: var(--signal);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  padding: 0 6px;
+}
+
+/* the away switch */
+.away-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  background: var(--card);
+  border: 1.5px solid var(--rule);
+  border-radius: 14px;
+  padding: 13px 15px;
+  margin-bottom: 16px;
+  cursor: pointer;
+  font-family: var(--body);
+  font-weight: 600;
+  font-size: 14.5px;
+  color: var(--ink);
+}
+.away-toggle.on { border-color: var(--signal); }
+.switch {
+  flex: none;
+  width: 42px;
+  height: 24px;
+  border-radius: 12px;
+  background: rgba(35, 74, 59, 0.2);
+  position: relative;
+  transition: background .18s;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left .18s;
+}
+.switch.on { background: var(--railing); }
+.switch.on::after { left: 21px; }
+
+/* the controls strip snaps by group, like every other scroller here */
+.scroll-strip { scroll-snap-type: x proximity; }
+.scroll-strip .controls-row > * { scroll-snap-align: start; }

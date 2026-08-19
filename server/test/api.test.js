@@ -1010,3 +1010,105 @@ test("the seeded neighbourhood has details on its listings", async () => {
   assert.ok(withSize.length >= 3, `expected sizes on furniture, saw ${withSize.length}`);
   assert.ok(body.items.every((i) => i.details && i.details.condition), "every listing says what condition it is in");
 });
+
+/* ---------------- the arrangement thread ---------------- */
+
+test("a claim opens a conversation, and the milestones write themselves", async () => {
+  const giver = await newNeighbour("Chat Giver");
+  const claimer = await newNeighbour("Chat Claimer");
+
+  const listed = await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Ficus in a basket", cat: "Garden", road: "Test Road, E8", address: "70 Test Road, London E8 3EP" },
+  });
+  const claimed = await call(`/items/${listed.body.id}/claim`, { method: "POST", token: claimer });
+  assert.equal(claimed.status, 200);
+  assert.ok(claimed.body.conversationId > 0, "the claim carries its conversation");
+
+  const thread = await call(`/chats/${claimed.body.conversationId}`, { token: claimer });
+  assert.equal(thread.status, 200);
+  assert.equal(thread.body.role, "collecting");
+  assert.ok(thread.body.messages.some((m) => m.system && /held for 30 minutes/.test(m.body)), "the app wrote the first line");
+  assert.ok(thread.body.address, "the claimer sees where to go");
+
+  /* both sides can talk; a third party cannot */
+  const sent = await call(`/chats/${claimed.body.conversationId}`, { method: "POST", token: claimer, body: { body: "On my way!" } });
+  assert.equal(sent.status, 201);
+  const reply = await call(`/chats/${claimed.body.conversationId}`, { method: "POST", token: giver, body: { body: "It's by the door" } });
+  assert.equal(reply.status, 201);
+  const stranger = await newNeighbour("Nosy Stranger");
+  const barred = await call(`/chats/${claimed.body.conversationId}`, { token: stranger });
+  assert.equal(barred.status, 404, "a stranger cannot read the thread");
+
+  /* the giver's list shows the unread count, and opening clears it */
+  const list = await call("/chats", { token: giver });
+  const mine = list.body.chats.find((c) => c.itemId === listed.body.id);
+  assert.ok(mine, "the giver sees the thread");
+  assert.equal(mine.role, "giving");
+  await call(`/chats/${claimed.body.conversationId}`, { token: giver });
+  const after = await call("/chats", { token: giver });
+  assert.equal(after.body.chats.find((c) => c.itemId === listed.body.id).unread, 0, "opening the thread read it");
+});
+
+test("stars unlock only after the handover, once, both directions", async () => {
+  const giver = await newNeighbour("Rated Giver");
+  const claimer = await newNeighbour("Rating Claimer");
+  const listed = await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Spice rack", cat: "Furniture", road: "Test Road, E8", address: "71 Test Road, London E8 3EP" },
+  });
+  await call(`/items/${listed.body.id}/claim`, { method: "POST", token: claimer });
+
+  const early = await call(`/items/${listed.body.id}/rate`, { method: "POST", token: claimer, body: { stars: 5 } });
+  assert.equal(early.status, 400, "no stars before the handover");
+
+  await call(`/items/${listed.body.id}/collected`, { method: "POST", token: claimer });
+
+  const rated = await call(`/items/${listed.body.id}/rate`, { method: "POST", token: claimer, body: { stars: 5 } });
+  assert.equal(rated.status, 201);
+  const again = await call(`/items/${listed.body.id}/rate`, { method: "POST", token: claimer, body: { stars: 1 } });
+  assert.equal(again.status, 409, "one rating per handover");
+
+  const giverRates = await call(`/items/${listed.body.id}/rate`, { method: "POST", token: giver, body: { stars: 4 } });
+  assert.equal(giverRates.status, 201, "the giver rates the collector too");
+
+  const stranger = await newNeighbour("Rating Stranger");
+  const barred = await call(`/items/${listed.body.id}/rate`, { method: "POST", token: stranger, body: { stars: 1 } });
+  assert.equal(barred.status, 403, "only the two people who met can rate");
+});
+
+test("an expired listing goes back up in one tap, a live one doesn't", async () => {
+  const giver = await newNeighbour("Relist Giver");
+  const listed = await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Herb planter", cat: "Garden", road: "Test Road, E8", address: "72 Test Road, London E8 3EP" },
+  });
+
+  const tooSoon = await call(`/items/${listed.body.id}/relist`, { method: "POST", token: giver });
+  assert.equal(tooSoon.status, 400, "still live — nothing to relist");
+});
+
+test("away mode hides your listings until you're back", async () => {
+  const giver = await newNeighbour("Away Giver");
+  const looker = await newNeighbour("Still Here");
+  const listed = await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Xylophone for kids", cat: "Kids", road: "Test Road, E8", address: "73 Test Road, London E8 3EP" },
+  });
+
+  const sees = async () => {
+    const feed = await call("/items?q=xylophone", { token: looker });
+    return feed.body.items.some((i) => i.id === listed.body.id);
+  };
+  assert.equal(await sees(), true, "visible before going away");
+
+  await call("/me", { method: "PATCH", token: giver, body: { away: true } });
+  assert.equal(await sees(), false, "hidden while away");
+
+  await call("/me", { method: "PATCH", token: giver, body: { away: false } });
+  assert.equal(await sees(), true, "back means back");
+});

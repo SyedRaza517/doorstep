@@ -415,7 +415,9 @@ async function itemContext(items, user) {
 
   const givers = await query(
     `SELECT u.id, u.name, u.lat,
-            (SELECT COUNT(*) FROM items i WHERE i.owner_id = u.id AND i.collected_at IS NOT NULL) AS handed
+            (SELECT COUNT(*) FROM items i WHERE i.owner_id = u.id AND i.collected_at IS NOT NULL) AS handed,
+            (SELECT COUNT(*) FROM ratings r WHERE r.ratee_id = u.id) AS rated,
+            (SELECT AVG(stars) FROM ratings r WHERE r.ratee_id = u.id) AS stars
      FROM users u WHERE u.id = ANY($1::bigint[])`,
     [ownerIds]
   );
@@ -427,7 +429,15 @@ async function itemContext(items, user) {
     givers: new Map(
       givers.map((g) => [
         num(g.id),
-        { id: num(g.id), name: String(g.name).split(/\s+/)[0], verified: g.lat != null, handed: num(g.handed) },
+        {
+          id: num(g.id),
+          name: String(g.name).split(/\s+/)[0],
+          verified: g.lat != null,
+          handed: num(g.handed),
+          /* an average of one review is an anecdote; three is a signal */
+          stars: num(g.rated) >= 3 ? Math.round(Number(g.stars) * 10) / 10 : null,
+          rated: num(g.rated),
+        },
       ])
     ),
     saved: new Set(saved.map((s) => num(s.item_id))),
@@ -599,7 +609,7 @@ app.patch(
   "/api/me",
   auth,
   wrap(async (req, res) => {
-    const { address, road, spot } = req.body || {};
+    const { address, road, spot, away } = req.body || {};
     if (spot != null && !SPOTS.includes(spot)) return fail(res, 400, "Pick where things usually wait", "spot");
     await query("UPDATE users SET address = $1, road = $2, spot = $3 WHERE id = $4", [
       address != null ? String(address).trim() : req.user.address,
@@ -607,8 +617,16 @@ app.patch(
       spot != null ? spot : req.user.spot,
       req.user.id,
     ]);
-    const u = await one("SELECT address, road, spot FROM users WHERE id = $1", [req.user.id]);
-    res.json({ ok: true, ...u });
+    /* holiday mode: your listings step out of the feed until you're back —
+       Vinted's pattern, so nobody knocks on an empty house */
+    if (away != null) {
+      await query("UPDATE users SET away_until = $1 WHERE id = $2", [
+        away ? Date.now() + 365 * 24 * 60 * 60 * 1000 : null,
+        req.user.id,
+      ]);
+    }
+    const u = await one("SELECT address, road, spot, away_until FROM users WHERE id = $1", [req.user.id]);
+    res.json({ ok: true, address: u.address, road: u.road, spot: u.spot, away: u.away_until != null && num(u.away_until) > Date.now() });
   })
 );
 
@@ -625,7 +643,19 @@ app.get(
       one("SELECT COUNT(*) AS n FROM no_shows WHERE user_id = $1 AND at > $2", [id, now - 30 * 24 * 60 * 60 * 1000]),
     ]);
     res.json({
-      user: { id, name, email, postcode, lat, lng, memberSince: created_at, address, road, spot },
+      user: {
+        id,
+        name,
+        email,
+        postcode,
+        lat,
+        lng,
+        memberSince: created_at,
+        address,
+        road,
+        spot,
+        away: req.user.away_until != null && num(req.user.away_until) > now,
+      },
       stats: {
         given: num(given.n),
         collected: num(collected.n),
@@ -671,6 +701,8 @@ app.get(
        quietly miss most of the neighbourhood. */
     const params = [now];
     let clause = "expires_at > $1";
+    /* a giver who is away has stepped out — their doorstep has nothing on it */
+    clause += ` AND owner_id NOT IN (SELECT id FROM users WHERE away_until IS NOT NULL AND away_until > ${Number(now)})`;
     if (req.guest) {
       clause += " AND hidden_at IS NULL";
     } else {
@@ -1274,6 +1306,179 @@ app.get(
   })
 );
 
+/* ---- the arrangement thread ----
+   Every claim opens one conversation between giver and claimer, and the app
+   itself writes the milestones into it — claimed, handed back, collected —
+   so the thread is the arrangement's own record. It is not a social network:
+   no thread exists without a claim behind it. */
+
+async function openThread(item, claimerId, now) {
+  const conv = await one(
+    `INSERT INTO conversations (item_id, giver_id, claimer_id, created_at)
+     VALUES ($1,$2,$3,$4)
+     ON CONFLICT (item_id, claimer_id) DO UPDATE SET item_id = EXCLUDED.item_id
+     RETURNING id`,
+    [item.id, item.owner_id, claimerId, now]
+  );
+  return num(conv.id);
+}
+
+async function threadNote(convId, body, now = Date.now()) {
+  await query("INSERT INTO messages (conversation_id, sender_id, body, created_at) VALUES ($1,NULL,$2,$3)", [
+    convId,
+    body,
+    now,
+  ]);
+}
+
+/* tell the other side a message landed, without them having to ask */
+async function pushMessage(convId, senderId, body, now) {
+  const conv = await one("SELECT * FROM conversations WHERE id = $1", [convId]);
+  if (!conv) return;
+  const to = num(conv.giver_id) === num(senderId) ? num(conv.claimer_id) : num(conv.giver_id);
+  pushTo(to, { type: "message", conversationId: num(convId), body, createdAt: now });
+}
+
+app.get(
+  "/api/chats",
+  auth,
+  wrap(async (req, res) => {
+    const rows = await query(
+      `SELECT c.id, c.item_id, c.giver_id, c.claimer_id, c.created_at,
+              i.title, i.photo_ref, i.photo, i.collected_at, i.claimed_by, i.claim_expires_at,
+              gu.name AS giver_name, cu.name AS claimer_name,
+              (SELECT body FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_body,
+              (SELECT created_at FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_at,
+              (SELECT COUNT(*) FROM messages m
+                 WHERE m.conversation_id = c.id AND m.read_at IS NULL
+                   AND m.sender_id IS NOT NULL AND m.sender_id <> $1) AS unread
+       FROM conversations c
+       JOIN items i ON i.id = c.item_id
+       JOIN users gu ON gu.id = c.giver_id
+       JOIN users cu ON cu.id = c.claimer_id
+       WHERE c.giver_id = $1 OR c.claimer_id = $1
+       ORDER BY COALESCE((SELECT MAX(created_at) FROM messages m WHERE m.conversation_id = c.id), c.created_at) DESC
+       LIMIT 40`,
+      [req.user.id]
+    );
+    res.json({
+      chats: rows.map((c) => {
+        const giving = num(c.giver_id) === num(req.user.id);
+        return {
+          id: num(c.id),
+          itemId: num(c.item_id),
+          title: c.title,
+          photoRef: c.photo_ref || null,
+          photo: c.photo || null,
+          with: String(giving ? c.claimer_name : c.giver_name).split(/[ ]+/)[0],
+          role: giving ? "giving" : "collecting",
+          lastBody: c.last_body || "",
+          lastAt: num(c.last_at || c.created_at),
+          unread: num(c.unread),
+          done: c.collected_at != null,
+        };
+      }),
+      unread: rows.reduce((n, c) => n + num(c.unread), 0),
+    });
+  })
+);
+
+app.get(
+  "/api/chats/:id",
+  auth,
+  wrap(async (req, res) => {
+    const conv = await one("SELECT * FROM conversations WHERE id = $1", [req.params.id]);
+    if (!conv || (num(conv.giver_id) !== req.user.id && num(conv.claimer_id) !== req.user.id))
+      return fail(res, 404, "No such conversation");
+
+    /* opening the thread is reading it */
+    await query(
+      "UPDATE messages SET read_at = $1 WHERE conversation_id = $2 AND read_at IS NULL AND sender_id IS NOT NULL AND sender_id <> $3",
+      [Date.now(), conv.id, req.user.id]
+    );
+
+    const msgs = await query("SELECT * FROM messages WHERE conversation_id = $1 ORDER BY id ASC LIMIT 200", [conv.id]);
+    const giving = num(conv.giver_id) === req.user.id;
+    const other = await one("SELECT name FROM users WHERE id = $1", [giving ? conv.claimer_id : conv.giver_id]);
+    const item = castItem(await one("SELECT * FROM items WHERE id = $1", [conv.item_id]));
+    /* once the handover has happened, the thread is where the stars live */
+    const rated = await one("SELECT id FROM ratings WHERE item_id = $1 AND rater_id = $2", [conv.item_id, req.user.id]);
+    res.json({
+      id: num(conv.id),
+      itemId: num(conv.item_id),
+      title: item ? item.title : "",
+      role: giving ? "giving" : "collecting",
+      with: other ? String(other.name).split(/[ ]+/)[0] : "",
+      address: giving || (item && item.claimed_by === req.user.id) ? item && item.address : null,
+      canRate: Boolean(item && item.collected_at != null && !rated),
+      messages: msgs.map((m) => ({
+        id: num(m.id),
+        mine: m.sender_id != null && num(m.sender_id) === req.user.id,
+        system: m.sender_id == null,
+        body: m.body,
+        createdAt: num(m.created_at),
+      })),
+    });
+  })
+);
+
+app.post(
+  "/api/chats/:id",
+  auth,
+  wrap(async (req, res) => {
+    const body = String((req.body || {}).body || "").trim().slice(0, 500);
+    if (!body) return fail(res, 400, "Say something", "body");
+
+    const conv = await one("SELECT * FROM conversations WHERE id = $1", [req.params.id]);
+    if (!conv || (num(conv.giver_id) !== req.user.id && num(conv.claimer_id) !== req.user.id))
+      return fail(res, 404, "No such conversation");
+
+    const otherId = num(conv.giver_id) === req.user.id ? num(conv.claimer_id) : num(conv.giver_id);
+    const blocked = await one(
+      "SELECT 1 AS x FROM blocks WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1)",
+      [req.user.id, otherId]
+    );
+    if (blocked) return fail(res, 403, "This conversation is closed");
+
+    const now = Date.now();
+    const row = await one(
+      "INSERT INTO messages (conversation_id, sender_id, body, created_at) VALUES ($1,$2,$3,$4) RETURNING id",
+      [conv.id, req.user.id, body, now]
+    );
+    await pushMessage(conv.id, req.user.id, body, now);
+    res.status(201).json({ id: num(row.id), body, createdAt: now });
+  })
+);
+
+/* ---- ratings ----
+   Stars unlock only after a real handover, both directions, once each. An
+   average is shown only after three people have spoken — one review is an
+   anecdote. */
+app.post(
+  "/api/items/:id/rate",
+  auth,
+  wrap(async (req, res) => {
+    const stars = Number((req.body || {}).stars);
+    if (!Number.isInteger(stars) || stars < 1 || stars > 5) return fail(res, 400, "One to five stars", "stars");
+
+    const it = castItem(await one("SELECT * FROM items WHERE id = $1", [req.params.id]));
+    if (!it || it.collected_at == null) return fail(res, 400, "Ratings open once the handover has happened");
+
+    let ratee = null;
+    if (it.claimed_by === req.user.id) ratee = it.owner_id; /* collector rates the giver */
+    if (it.owner_id === req.user.id) ratee = it.claimed_by; /* giver rates the collector */
+    if (ratee == null) return fail(res, 403, "Only the two people who met can rate this");
+
+    const inserted = await query(
+      `INSERT INTO ratings (item_id, rater_id, ratee_id, stars, created_at)
+       VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING id`,
+      [it.id, req.user.id, ratee, stars, Date.now()]
+    );
+    if (!inserted.length) return fail(res, 409, "You've already rated this handover");
+    res.status(201).json({ ok: true });
+  })
+);
+
 /* ---- claiming ---- */
 
 app.post(
@@ -1331,7 +1536,23 @@ app.post(
     });
 
     if (outcome.error) return fail(res, outcome.status, outcome.error);
-    res.json(await publicOne(outcome.item, req.user, now));
+
+    /* the claim opens the conversation, and the app writes the first line */
+    const convId = await openThread(outcome.item, req.user.id, now);
+    await threadNote(
+      convId,
+      `${req.user.name.split(/[ ]+/)[0]} claimed this — it's held for 30 minutes. It'll be waiting ${outcome.item.spot === "buzz and collect" ? "once you buzz" : `on the ${outcome.item.spot}`} at ${outcome.item.address}.`,
+      now
+    );
+    pushTo(num(outcome.item.owner_id), {
+      type: "message",
+      conversationId: convId,
+      body: `${req.user.name.split(/[ ]+/)[0]} claimed ${outcome.item.title}`,
+      createdAt: now,
+    });
+
+    const claimed = await publicOne(outcome.item, req.user, now);
+    res.json({ ...claimed, conversationId: convId });
   })
 );
 
@@ -1347,6 +1568,12 @@ app.post(
     if (!it || it.claimed_by !== req.user.id || it.collected_at != null)
       return fail(res, 400, "That isn't yours to hand back");
     const row = await one("UPDATE items SET claimed_by = NULL, claim_expires_at = NULL WHERE id = $1 RETURNING *", [it.id]);
+
+    const conv = await one("SELECT id FROM conversations WHERE item_id = $1 AND claimer_id = $2", [it.id, req.user.id]);
+    if (conv) {
+      await threadNote(num(conv.id), "Handed back — it's up for grabs again. No hard feelings.", now);
+      await pushMessage(num(conv.id), req.user.id, "Handed back", now);
+    }
     res.json(await publicOne(castItem(row), req.user, now));
   })
 );
@@ -1362,7 +1589,40 @@ app.post(
     if (!it || it.claimed_by !== req.user.id || it.collected_at != null)
       return fail(res, 400, "That item isn't yours to confirm");
     await query("UPDATE items SET collected_at = $1, expires_at = $1 WHERE id = $2", [now, it.id]);
+
+    const conv = await one("SELECT id FROM conversations WHERE item_id = $1 AND claimer_id = $2", [it.id, req.user.id]);
+    if (conv) {
+      await threadNote(num(conv.id), "Collected. Another thing that never became waste.", now);
+      await pushMessage(num(conv.id), req.user.id, "Collected", now);
+    }
     res.json({ ok: true });
+  })
+);
+
+/* One tap puts an expired, uncollected listing back up for another window —
+   Trash Nothing calls this repost, and it is the difference between "nobody
+   came" and "gone by tea time". */
+app.post(
+  "/api/items/:id/relist",
+  auth,
+  wrap(async (req, res) => {
+    const now = Date.now();
+    const it = castItem(await one("SELECT * FROM items WHERE id = $1", [req.params.id]));
+    if (!it || it.owner_id !== req.user.id) return fail(res, 403, "Only your own listing can go back up");
+    if (it.collected_at != null) return fail(res, 400, "That one was collected — nothing to relist");
+    if (it.expires_at > now) return fail(res, 400, "It's still live");
+    if (it.type === "food" && it.use_by && it.use_by < now + 60 * 60 * 1000)
+      return fail(res, 400, "Its use-by date is too close now — food past its date can't be passed on");
+
+    const row = await one(
+      "UPDATE items SET expires_at = $1, created_at = $2, claimed_by = NULL, claim_expires_at = NULL WHERE id = $3 RETURNING *",
+      [now + num(it.window_ms), now, it.id]
+    );
+    const fresh = castItem(row);
+    /* it counts as newly listed, so wishers hear about it — wish_told still
+       guarantees nobody is told about the same item twice */
+    await notifyMatchingWishes(fresh, req.user.id);
+    res.json(await publicOne(fresh, req.user, now));
   })
 );
 
@@ -1480,7 +1740,7 @@ app.get(
   auth,
   wrap(async (req, res) => {
     const id = req.user.id;
-    const [listings, claims, wishList, watchlist, notifications, blocked, noShows] = await Promise.all([
+    const [listings, claims, wishList, watchlist, notifications, blocked, noShows, chatMessages, ratingsGiven] = await Promise.all([
       query("SELECT title, note, cat, road, address, created_at, expires_at, collected_at FROM items WHERE owner_id = $1", [id]),
       query("SELECT title, road, claim_expires_at, collected_at FROM items WHERE claimed_by = $1", [id]),
       query("SELECT keyword, cat, radius, created_at FROM wishes WHERE user_id = $1", [id]),
@@ -1488,6 +1748,13 @@ app.get(
       query("SELECT title, body, created_at FROM notifications WHERE user_id = $1", [id]),
       query("SELECT blocked_id, created_at FROM blocks WHERE blocker_id = $1", [id]),
       query("SELECT item_id, at FROM no_shows WHERE user_id = $1", [id]),
+      query(
+        `SELECT m.body, m.created_at, m.sender_id = $1 AS sent FROM messages m
+         JOIN conversations c ON c.id = m.conversation_id
+         WHERE (c.giver_id = $1 OR c.claimer_id = $1) AND m.sender_id IS NOT NULL`,
+        [id]
+      ),
+      query("SELECT item_id, stars, created_at FROM ratings WHERE rater_id = $1", [id]),
     ]);
     res.json({
       exportedAt: new Date().toISOString(),
@@ -1499,6 +1766,8 @@ app.get(
       notifications,
       blocked,
       noShows,
+      chatMessages,
+      ratingsGiven,
     });
   })
 );
@@ -1517,6 +1786,9 @@ app.delete(
       await q("UPDATE items SET address = 'removed' WHERE owner_id = $1", [id]);
       await q("DELETE FROM wish_hits WHERE wish_id IN (SELECT id FROM wishes WHERE user_id = $1)", [id]);
       await q("DELETE FROM wish_told WHERE user_id = $1", [id]);
+      await q("DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE giver_id = $1 OR claimer_id = $1)", [id]);
+      await q("DELETE FROM conversations WHERE giver_id = $1 OR claimer_id = $1", [id]);
+      await q("DELETE FROM ratings WHERE rater_id = $1 OR ratee_id = $1", [id]);
       await q("DELETE FROM wishes WHERE user_id = $1", [id]);
       await q("DELETE FROM notifications WHERE user_id = $1", [id]);
       await q("DELETE FROM saves WHERE user_id = $1", [id]);

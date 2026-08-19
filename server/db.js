@@ -256,6 +256,39 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at);
 
+/* One conversation per claim: the giver, the claimer, and the thing between
+   them. Chat exists to arrange a handover, not to be a social network, so a
+   thread is born when a claim is made and nowhere else. */
+CREATE TABLE IF NOT EXISTS conversations (
+  id         BIGSERIAL PRIMARY KEY,
+  item_id    BIGINT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  giver_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  claimer_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at BIGINT NOT NULL,
+  UNIQUE (item_id, claimer_id)
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id              BIGSERIAL PRIMARY KEY,
+  conversation_id BIGINT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  sender_id       BIGINT REFERENCES users(id) ON DELETE SET NULL,  -- NULL = the app itself
+  body            TEXT NOT NULL,
+  created_at      BIGINT NOT NULL,
+  read_at         BIGINT
+);
+
+/* Both sides rate a handover once it has happened — stars unlock only after
+   collection, one rating per person per item, exactly Olio's gate. */
+CREATE TABLE IF NOT EXISTS ratings (
+  id         BIGSERIAL PRIMARY KEY,
+  item_id    BIGINT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  rater_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ratee_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  stars      INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
+  created_at BIGINT NOT NULL,
+  UNIQUE (item_id, rater_id)
+);
+
 CREATE TABLE IF NOT EXISTS saves (
   user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   item_id    BIGINT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
@@ -303,6 +336,8 @@ export async function initDb() {
     ALTER TABLE items ADD COLUMN IF NOT EXISTS details TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS uprn TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS address_verified TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS away_until BIGINT;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS wanted BOOLEAN NOT NULL DEFAULT FALSE;
   `);
 }
 
