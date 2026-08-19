@@ -3486,9 +3486,32 @@ export default function Doorstep() {
 
                 <span>
                   {q.trim() || filter !== "Going soonest"
-                    ? "Try a wider radius, or add it to your wish list and we'll tell you the moment one appears."
+                    ? "Try a wider radius — or let the app do the waiting."
                     : "Things come and go through the day. Have something to pass on instead?"}
                 </span>
+
+                {/* a failed search is a wish that hasn't been made yet */}
+                {q.trim() && feed.elsewhere === 0 && !savedOnly && (
+                  <button
+                    className="primary-btn"
+                    onClick={async () => {
+                      if (needsAccount("Sign in and we'll watch the neighbourhood for it", { action: "home" })) return;
+                      try {
+                        const created = await api("/wishes", {
+                          method: "POST",
+                          token,
+                          body: { keyword: q.trim(), cat: "Anything", radius: Number.isFinite(radius) && radius > 0 ? radius : 2 },
+                        });
+                        setWishes((list) => [created, ...list]);
+                        setToast(`On your wish list — the moment a ${q.trim().toLowerCase()} appears nearby, you'll know.`);
+                      } catch (e) {
+                        setToast(e.message);
+                      }
+                    }}
+                  >
+                    Wish for "{q.trim()}" — we'll watch for one
+                  </button>
+                )}
               </div>
             )}
 

@@ -673,12 +673,32 @@ app.get(
    the item straight back in the feed */
 async function sweepLapsedClaims(now) {
   const lapsed = await query(
-    "SELECT id, claimed_by FROM items WHERE claimed_by IS NOT NULL AND collected_at IS NULL AND claim_expires_at <= $1",
+    `SELECT i.id, i.claimed_by, i.title, i.owner_id, i.expires_at FROM items i
+     WHERE i.claimed_by IS NOT NULL AND i.collected_at IS NULL AND i.claim_expires_at <= $1`,
     [now]
   );
   for (const it of lapsed) {
     await query("INSERT INTO no_shows (user_id, item_id, at) VALUES ($1,$2,$3)", [it.claimed_by, it.id, now]);
     await query("UPDATE items SET claimed_by = NULL, claim_expires_at = NULL WHERE id = $1", [it.id]);
+
+    /* both sides deserve to hear it, not discover it */
+    if (num(it.expires_at) > now) {
+      const noteBody = "The hold lapsed — it's back up for grabs.";
+      const giverRow = await one(
+        "INSERT INTO notifications (user_id, item_id, title, body, created_at) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+        [it.owner_id, it.id, it.title, noteBody, now]
+      );
+      pushTo(num(it.owner_id), {
+        type: "alert",
+        id: num(giverRow.id),
+        itemId: num(it.id),
+        title: it.title,
+        body: noteBody,
+        createdAt: now,
+      });
+    }
+    const conv = await one("SELECT id FROM conversations WHERE item_id = $1 AND claimer_id = $2", [it.id, it.claimed_by]);
+    if (conv) await threadNote(num(conv.id), "The 30-minute hold ran out, so it's back up for grabs. Claim it again if you're still coming.", now);
   }
 }
 
