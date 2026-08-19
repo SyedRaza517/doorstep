@@ -3711,3 +3711,84 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
   cursor: pointer;
 }
 .trip-add:active { transform: scale(0.96); }
+
+/* ---- item passports ----
+   The story a free thing carries between homes: a bordered card with a
+   signal-yellow spine, stamped like a page in a well-travelled passport. */
+.passport-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-left: 4px solid var(--signal);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+.passport-stamp {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  color: var(--railing);
+  /* a rubber stamp never lands perfectly square */
+  transform: rotate(-8deg);
+  opacity: 0.85;
+}
+.passport-stamp svg { width: 100%; height: 100%; }
+.passport-lines { flex: 1; min-width: 0; }
+.passport-lines b {
+  display: block;
+  font-family: var(--display);
+  font-size: 15px;
+  color: var(--ink);
+}
+.passport-lines > span {
+  display: block;
+  font-size: 12.5px;
+  color: var(--hush);
+  margin-top: 2px;
+}
+.passport-notes {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0 0 0 10px;
+  border-left: 2px solid var(--rule);
+}
+.passport-notes li {
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.45;
+  color: var(--ink);
+  margin: 0 0 4px;
+}
+.passport-notes li:last-child { margin-bottom: 0; }
+
+/* the one-line note in the give composer when a passport is travelling */
+.passport-passing {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--railing);
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-left: 4px solid var(--signal);
+  border-radius: 10px;
+  padding: 9px 12px;
+  margin: 0 0 12px;
+}
+
+/* the optional story line offered in the thanks sheet */
+.passport-line-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--body);
+  font-size: 13.5px;
+  color: var(--ink);
+  background: var(--render);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0 0 10px;
+}
+.passport-line-input::placeholder { color: var(--hush); }
+.passport-line-input:focus { outline: none; border-color: var(--railing); }

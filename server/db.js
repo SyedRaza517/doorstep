@@ -333,6 +333,18 @@ CREATE TABLE IF NOT EXISTS follows (
   PRIMARY KEY (follower_id, giver_id)
 );
 
+/* An item's passport: listings that are the same physical thing share a
+   lineage_id, and neighbours may each add one line to its story. author_id
+   is ON DELETE SET NULL so a GDPR erasure keeps the story but drops the
+   person — the note was always shown without a name anyway. */
+CREATE TABLE IF NOT EXISTS lineage_notes (
+  id         BIGSERIAL PRIMARY KEY,
+  lineage_id TEXT NOT NULL,
+  author_id  BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  body       TEXT NOT NULL,
+  created_at BIGINT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS reports (
   id          BIGSERIAL PRIMARY KEY,
   item_id     BIGINT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
@@ -362,6 +374,7 @@ export async function initDb() {
     ALTER TABLE items ADD COLUMN IF NOT EXISTS last_orders_told BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS under_cover BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS dibs BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS lineage_id TEXT;
   `);
 }
 

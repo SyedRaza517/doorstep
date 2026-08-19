@@ -464,7 +464,20 @@ const EMPTY_GIVE = {
   useBy: "",
   portions: 1,
   details: {},
+  /* set when relisting something collected through the app — links the two
+     listings into one lineage, so the item's passport travels with it */
+  passFrom: null,
 };
+
+/* 1 → "1st", 2 → "2nd", 23 → "23rd" — for "2nd home" on a passport */
+function ordinal(n) {
+  const tail = n % 100;
+  const suffix = tail >= 11 && tail <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th";
+  return `${n}${suffix}`;
+}
+
+/* "August 2026" — when the story began */
+const monthYear = (ms) => new Date(ms).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
 
 /* how long until a use-by date, in words */
 function untilUseBy(ms) {
@@ -645,6 +658,8 @@ export default function Doorstep() {
   const [peek, setPeek] = useState(null);
   const [blocked, setBlocked] = useState([]);
   const [thanking, setThanking] = useState(null);
+  /* an optional line for the item's passport, offered alongside the thank-you */
+  const [storyLine, setStoryLine] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [savedOnly, setSavedOnly] = useState(false);
   const [asksOnly, setAsksOnly] = useState(false);
@@ -1219,8 +1234,18 @@ export default function Doorstep() {
     }
   };
 
+  /* The passport line is a bonus, never a blocker: if it fails, the thanks
+     (or the dismissal) still goes through without a murmur. */
+  const sendStoryLine = (item) => {
+    const line = storyLine.trim();
+    setStoryLine("");
+    if (!line || !item) return;
+    api(`/items/${item.id}/passport-note`, { method: "POST", token, body: { body: line } }).catch(() => {});
+  };
+
   const sendThanks = async (item, kind) => {
     setThanking(null);
+    sendStoryLine(item);
     try {
       await api(`/items/${item.id}/thanks`, { method: "POST", token, body: { token: kind } });
       setToast("Sent. They'll see it in their alerts.");
@@ -1663,6 +1688,7 @@ export default function Doorstep() {
           claimMode: give.claimMode,
           underCover: give.underCover,
           dibs: give.dibs,
+          passFrom: give.passFrom,
         },
       });
       setItems((list) => [...list, created]);
@@ -1742,6 +1768,14 @@ export default function Doorstep() {
               That's one more thing that didn't become waste. Want to say thanks to{" "}
               {thanking.giver ? thanking.giver.name : "them"}?
             </p>
+            <input
+              className="passport-line-input"
+              type="text"
+              maxLength={120}
+              placeholder="Add a line to its story (optional)"
+              value={storyLine}
+              onChange={(e) => setStoryLine(e.target.value)}
+            />
             {[
               { k: "wave", label: "Give a wave" },
               { k: "brew", label: "I owe you a brew" },
@@ -1752,7 +1786,14 @@ export default function Doorstep() {
                 {t.label}
               </button>
             ))}
-            <button className="sheet-cancel" onClick={() => setThanking(null)}>
+            <button
+              className="sheet-cancel"
+              onClick={() => {
+                /* skipping the thanks shouldn't lose a line they bothered to write */
+                sendStoryLine(thanking);
+                setThanking(null);
+              }}
+            >
               Not now
             </button>
           </div>
@@ -2232,6 +2273,31 @@ export default function Doorstep() {
                   );
                 })()}
 
+                {item.passport && (
+                  <div className="passport-card">
+                    <span className="passport-stamp" aria-hidden="true">
+                      {/* a hand-drawn stamp: a circle with a leaf, the mark of a thing still in use */}
+                      <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="16" cy="16" r="13" />
+                        <circle cx="16" cy="16" r="10.4" strokeDasharray="2.2 2.6" strokeWidth="1" />
+                        <path d="M16 22c-3.4-1.6-5-4.2-5-7 0-2.4 1.8-4.6 5-5.6 3.2 1 5 3.2 5 5.6 0 2.8-1.6 5.4-5 7Z" />
+                        <path d="M16 22v-8" strokeWidth="1.2" />
+                      </svg>
+                    </span>
+                    <div className="passport-lines">
+                      <b>{ordinal(item.passport.homes)} home</b>
+                      <span>First shared on Doorstep in {monthYear(item.passport.firstSharedAt)}</span>
+                      {item.passport.notes.length > 0 && (
+                        <ul className="passport-notes">
+                          {item.passport.notes.map((n, i) => (
+                            <li key={i}>&ldquo;{n.body}&rdquo;</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {item.giver && !item.owner && (
                   <div className="giver-card">
                     <span className="giver-avatar">{item.giver.name.slice(0, 1).toUpperCase()}</span>
@@ -2640,6 +2706,26 @@ export default function Doorstep() {
                         Say thanks
                       </button>
                     )}
+                    <button
+                      className="quiet"
+                      onClick={() => {
+                        /* relist it with the link back to this collection, so the
+                           two listings join into one passport — the composer keeps
+                           the doorstep details already on file */
+                        setGive((g) => ({
+                          ...EMPTY_GIVE,
+                          title: it.title,
+                          cat: it.cat,
+                          passFrom: it.id,
+                          address: g.address,
+                          road: g.road,
+                          spot: g.spot,
+                        }));
+                        setScreen("give");
+                      }}
+                    >
+                      Pass it on
+                    </button>
                   </div>
                 </div>
               ))}
@@ -3772,6 +3858,9 @@ export default function Doorstep() {
               )}
               {giveErrors.confirm && <p className="field-note">{giveErrors.confirm}</p>}
 
+              {give.passFrom != null && (
+                <p className="passport-passing">This one's getting its next home — its passport travels with it.</p>
+              )}
               <button className="primary-btn" onClick={submitGive} disabled={busy}>
                 {busy ? (give.wanted ? "Asking" : "Listing") : give.wanted ? "Put the ask up" : "Put it on the doorstep"}
               </button>

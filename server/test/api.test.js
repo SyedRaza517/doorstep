@@ -1392,3 +1392,99 @@ test("one trip: a bundle joins the anchor's hold, refuses other doorsteps and st
   assert.ok(notes.some((m) => m.body.includes("Trip side table")));
   assert.ok(notes.some((m) => m.body.includes("Trip mirror")));
 });
+
+test("an item passport follows a thing from home to home", async () => {
+  const giver = await newNeighbour("Passport Giver");
+  const taker = await newNeighbour("Passport Taker");
+  const stranger = await newNeighbour("Passport Stranger");
+
+  /* A lists it — no story yet, so no passport */
+  const before = Date.now();
+  const first = await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Travelling teapot", cat: "Furniture", road: "Test Road, E8", address: "90 Test Road, London E8 3EP" },
+  });
+  const after = Date.now();
+  assert.equal(first.status, 201);
+  assert.equal(first.body.passport, null, "a fresh listing carries no passport");
+
+  /* B claims and collects it, then puts it back out with the link */
+  await call(`/items/${first.body.id}/claim`, { method: "POST", token: taker });
+  await call(`/items/${first.body.id}/collected`, { method: "POST", token: taker });
+
+  const second = await call("/items", {
+    method: "POST",
+    token: taker,
+    body: {
+      title: "Travelling teapot",
+      cat: "Furniture",
+      road: "Test Road, E8",
+      address: "91 Test Road, London E8 3EP",
+      passFrom: first.body.id,
+    },
+  });
+  assert.equal(second.status, 201);
+  assert.ok(second.body.passport, "the relisting carries the passport");
+  assert.equal(second.body.passport.homes, 2, "two listings, two homes");
+  assert.ok(
+    second.body.passport.firstSharedAt >= before && second.body.passport.firstSharedAt <= after,
+    "the story starts when the first listing went up"
+  );
+
+  /* the feed shape shows the same story */
+  const feed = await call("/items?q=travelling+teapot", { token: stranger });
+  const inFeed = feed.body.items.find((i) => i.id === second.body.id);
+  assert.ok(inFeed, "the relisting is live in the feed");
+  assert.equal(inFeed.passport.homes, 2);
+  assert.equal(inFeed.passport.firstSharedAt, second.body.passport.firstSharedAt);
+
+  /* the lineage was written onto BOTH items: the collected one now tells the
+     same story from B's "Collected" tab */
+  const mine = await call("/me/stuff", { token: taker });
+  const collectedRow = mine.body.collected.find((i) => i.id === first.body.id);
+  assert.ok(collectedRow.passport, "the first item joined the lineage too");
+  assert.equal(collectedRow.passport.homes, 2, "both items share the lineage");
+
+  /* B adds a line to the story — once, and only once */
+  const note = await call(`/items/${second.body.id}/passport-note`, {
+    method: "POST",
+    token: taker,
+    body: { body: "Survived two house moves already" },
+  });
+  assert.equal(note.status, 200);
+  const storied = await call("/items?q=travelling+teapot", { token: stranger });
+  const withNote = storied.body.items.find((i) => i.id === second.body.id);
+  assert.equal(withNote.passport.notes.length, 1);
+  assert.equal(withNote.passport.notes[0].body, "Survived two house moves already");
+
+  const twice = await call(`/items/${second.body.id}/passport-note`, {
+    method: "POST",
+    token: taker,
+    body: { body: "Trying to write a second line" },
+  });
+  assert.equal(twice.status, 409, "one line per person per story");
+
+  /* a stranger never held the thing, so they get no pen */
+  const cheeky = await call(`/items/${second.body.id}/passport-note`, {
+    method: "POST",
+    token: stranger,
+    body: { body: "I never touched this teapot" },
+  });
+  assert.equal(cheeky.status, 403);
+
+  /* a bogus passFrom is ignored silently — the listing still goes up, storyless */
+  const bogus = await call("/items", {
+    method: "POST",
+    token: stranger,
+    body: {
+      title: "Storyless stool",
+      cat: "Furniture",
+      road: "Test Road, E8",
+      address: "92 Test Road, London E8 3EP",
+      passFrom: 99999999,
+    },
+  });
+  assert.equal(bogus.status, 201, "a broken link never blocks a listing");
+  assert.equal(bogus.body.passport, null);
+});

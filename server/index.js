@@ -446,7 +446,7 @@ async function startSession(user) {
 async function itemContext(items, user) {
   const ownerIds = [...new Set(items.map((i) => Number(i.owner_id)))];
   const itemIds = items.map((i) => Number(i.id));
-  if (!ownerIds.length) return { givers: new Map(), saved: new Set(), following: new Set() };
+  if (!ownerIds.length) return { givers: new Map(), saved: new Set(), following: new Set(), lineages: new Map() };
 
   const givers = await query(
     `SELECT u.id, u.name, u.lat, u.postcode,
@@ -475,6 +475,39 @@ async function itemContext(items, user) {
     if (num(h.user_id) === user.id) handsUp.add(num(h.item_id));
   }
 
+  /* Passports, like givers and saves, are fetched once for the whole page:
+     most items carry no lineage, so this usually costs nothing at all, and a
+     page full of storied items still costs two queries rather than one per
+     card. */
+  const lineageIds = [...new Set(items.map((i) => i.lineage_id).filter(Boolean))];
+  const lineages = new Map();
+  if (lineageIds.length) {
+    const stats = await query(
+      `SELECT lineage_id, COUNT(*) AS homes, MIN(created_at) AS first
+       FROM items WHERE lineage_id = ANY($1::text[]) GROUP BY lineage_id`,
+      [lineageIds]
+    );
+    const noteRows = await query(
+      `SELECT lineage_id, body, created_at FROM lineage_notes
+       WHERE lineage_id = ANY($1::text[]) ORDER BY created_at, id`,
+      [lineageIds]
+    );
+    /* the story reads oldest line first, and five lines is a story — more is a forum */
+    const notesBy = new Map();
+    for (const n of noteRows) {
+      const list = notesBy.get(n.lineage_id) || [];
+      if (list.length < 5) list.push({ body: n.body, at: num(n.created_at) });
+      notesBy.set(n.lineage_id, list);
+    }
+    for (const s of stats) {
+      lineages.set(s.lineage_id, {
+        homes: num(s.homes),
+        firstSharedAt: num(s.first),
+        notes: notesBy.get(s.lineage_id) || [],
+      });
+    }
+  }
+
   return {
     givers: new Map(
       givers.map((g) => [
@@ -496,6 +529,7 @@ async function itemContext(items, user) {
     following: new Set(followed.map((f) => num(f.giver_id))),
     handsUp,
     handCounts,
+    lineages,
   };
 }
 
@@ -567,6 +601,9 @@ function publicItem(it, user, now, ctx) {
     giver: ctx.givers.has(it.owner_id)
       ? { ...ctx.givers.get(it.owner_id), following: ctx.following.has(num(it.owner_id)) }
       : null,
+    /* null for the vast majority of items that have never been relisted —
+       a passport only exists once a thing has a story to tell */
+    passport: it.lineage_id ? (ctx.lineages && ctx.lineages.get(it.lineage_id)) || null : null,
     saved: ctx.saved.has(it.id),
     windowMs: it.window_ms,
     expiresAt: it.expires_at,
@@ -1096,6 +1133,7 @@ app.post(
       claimMode = "instant",
       underCover = false,
       dibs = false,
+      passFrom = null,
     } = req.body || {};
     if (!["instant", "fair"].includes(claimMode)) return fail(res, 400, "First to claim, or you pick", "claimMode");
     const isAsk = wanted === true;
@@ -1140,10 +1178,29 @@ app.post(
     if (type === "food" && now + windowMs > useByAt) windowMs = Math.max(15 * 60 * 1000, useByAt - now);
     const servings = Math.max(1, Math.min(20, Number(portions) || 1));
 
+    /* Passing something on: if the lister collected passFrom through the app,
+       the two listings join into one lineage — the item's passport. An
+       invalid passFrom (not theirs, never collected, or plain nonsense) is
+       ignored silently: a broken link must never block a listing. */
+    let lineageId = null;
+    const passFromId = Number(passFrom);
+    if (passFromId && Number.isSafeInteger(passFromId) && !isAsk) {
+      const prev = await one(
+        "SELECT id, lineage_id FROM items WHERE id = $1 AND claimed_by = $2 AND collected_at IS NOT NULL",
+        [passFromId, req.user.id]
+      );
+      if (prev) {
+        /* inherit the story, or mint one and write it onto both items so the
+           chain holds however many more homes the thing goes on to have */
+        lineageId = prev.lineage_id || newToken();
+        if (!prev.lineage_id) await query("UPDATE items SET lineage_id = $1 WHERE id = $2", [lineageId, prev.id]);
+      }
+    }
+
     /* the item sits on the giver's own property, so it inherits their coordinates */
     const row = await one(
-      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, photo, photos, spot, postcode, lat, lng, type, use_by, portions, details, wanted, claim_mode, under_cover, dibs)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING *`,
+      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, photo, photos, spot, postcode, lat, lng, type, use_by, portions, details, wanted, claim_mode, under_cover, dibs, lineage_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) RETURNING *`,
       [
         req.user.id,
         title.trim(),
@@ -1169,6 +1226,7 @@ app.post(
         isAsk ? "instant" : claimMode,
         underCover === true,
         dibs === true && !isAsk,
+        lineageId,
       ]
     );
 
@@ -2248,6 +2306,51 @@ app.post(
   })
 );
 
+/* ---- item passports ----
+   One line each, from the people who actually held the thing: the person who
+   gave it and the person who collected it. The line belongs to the lineage,
+   not the listing, so it travels with the item to its next home. */
+app.post(
+  "/api/items/:id/passport-note",
+  auth,
+  wrap(async (req, res) => {
+    const body = String((req.body || {}).body || "").trim();
+    if (!body) return fail(res, 400, "Write a line first", "body");
+    if (body.length > 120) return fail(res, 400, "Keep it to one line — 120 characters at most", "body");
+
+    const it = castItem(await one("SELECT * FROM items WHERE id = $1", [req.params.id]));
+    if (!it) return fail(res, 404, "That listing has gone");
+    /* only hands that touched it may write: the current claimer once the
+       handover has actually happened, or the person who gave it */
+    const heldIt = (it.claimed_by === req.user.id && it.collected_at != null) || it.owner_id === req.user.id;
+    if (!heldIt) return fail(res, 403, "Only the giver or whoever collected it can add to its story");
+
+    /* a first note starts the passport — the lineage exists from here on,
+       even if the item never gets relisted */
+    let lineageId = it.lineage_id;
+    if (!lineageId) {
+      lineageId = newToken();
+      await query("UPDATE items SET lineage_id = $1 WHERE id = $2", [lineageId, it.id]);
+    }
+
+    /* one line per person per story — checked in code rather than a unique
+       index, since author_id goes NULL on erasure and must not collide */
+    const already = await one("SELECT id FROM lineage_notes WHERE lineage_id = $1 AND author_id = $2", [
+      lineageId,
+      req.user.id,
+    ]);
+    if (already) return fail(res, 409, "You've already added your line to this one's story");
+
+    await query("INSERT INTO lineage_notes (lineage_id, author_id, body, created_at) VALUES ($1,$2,$3,$4)", [
+      lineageId,
+      req.user.id,
+      body,
+      Date.now(),
+    ]);
+    res.json({ ok: true });
+  })
+);
+
 /* ---- blocking ---- */
 
 app.post(
@@ -2388,6 +2491,10 @@ app.delete(
       await q("DELETE FROM saves WHERE user_id = $1", [id]);
       await q("DELETE FROM blocks WHERE blocker_id = $1 OR blocked_id = $1", [id]);
       await q("DELETE FROM follows WHERE follower_id = $1 OR giver_id = $1", [id]);
+      /* lineage_notes need nothing here: the account row is anonymised below
+         rather than deleted, notes are shown without a name anyway, and the
+         column's ON DELETE SET NULL covers any future hard delete — the
+         item's story outlives the neighbour who wrote a line of it */
       await q("DELETE FROM sessions WHERE user_id = $1", [id]);
       await q(
         "UPDATE users SET name = 'Former neighbour', email = $1, postcode = '', lat = NULL, lng = NULL, address = NULL, road = NULL, password_hash = $2 WHERE id = $3",
