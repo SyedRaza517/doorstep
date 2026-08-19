@@ -249,6 +249,51 @@ const FOOD_CATS = [
   { cat: "Drinks", kind: "drink", pic: "drinks" },
 ];
 
+/* What a neighbour needs to know before walking over. The questions differ
+   by category, because a highchair and a floor lamp raise different ones. */
+const DETAIL_COMMON = [
+  { key: "condition", label: "Condition", type: "choice", options: ["New", "As good as new", "Good", "Fair", "Well used"] },
+  { key: "carry", label: "Getting it home", type: "choice", options: ["One person can carry it", "Two people", "Needs a car or van"] },
+];
+
+const DETAIL_BY_CAT = {
+  Furniture: [
+    { key: "width", label: "Width", type: "cm" },
+    { key: "depth", label: "Depth", type: "cm" },
+    { key: "height", label: "Height", type: "cm" },
+    { key: "material", label: "Material", type: "choice", options: ["Wood", "Metal", "Glass", "Fabric", "Plastic", "Mixed"] },
+    { key: "colour", label: "Colour", type: "text" },
+    { key: "brand", label: "Make", type: "text" },
+    { key: "flatpack", label: "Comes apart", type: "choice", options: ["Yes, flat packs", "No, one piece"] },
+  ],
+  Kids: [
+    { key: "ages", label: "Suits ages", type: "choice", options: ["0-1", "1-3", "3-5", "5-8", "8-12", "Any age"] },
+    { key: "brand", label: "Make", type: "text" },
+    { key: "pieces", label: "All pieces there", type: "choice", options: ["Yes, complete", "Some pieces missing"] },
+    { key: "washed", label: "Cleaned", type: "choice", options: ["Yes, cleaned", "Needs a wipe"] },
+  ],
+  Garden: [
+    { key: "width", label: "Width", type: "cm" },
+    { key: "height", label: "Height", type: "cm" },
+    { key: "material", label: "Material", type: "choice", options: ["Terracotta", "Plastic", "Wood", "Metal", "Stone"] },
+    { key: "quantity", label: "How many", type: "text" },
+  ],
+  Electricals: [
+    { key: "works", label: "Working order", type: "choice", options: ["Works fine", "Works, with a fault", "Not working, for parts"] },
+    { key: "cable", label: "Cable or charger", type: "choice", options: ["Included", "Not included"] },
+    { key: "brand", label: "Make", type: "text" },
+    { key: "age", label: "Roughly how old", type: "choice", options: ["Under a year", "1-3 years", "3-5 years", "Over 5 years"] },
+  ],
+  food: [
+    { key: "storage", label: "How to keep it", type: "choice", options: ["Cupboard", "Fridge", "Freezer"] },
+    { key: "opened", label: "Packaging", type: "choice", options: ["Unopened", "Opened but sealed inside", "Loose"] },
+    { key: "diet", label: "Suitable for", type: "choice", options: ["Anyone", "Vegetarian", "Vegan"] },
+    { key: "allergens", label: "Contains", type: "text", hint: "Nuts, milk, gluten and so on - copy what the packet says" },
+  ],
+};
+
+const fieldsFor = (type, cat) => [...DETAIL_COMMON, ...(type === "food" ? DETAIL_BY_CAT.food : DETAIL_BY_CAT[cat] || [])];
+
 const catsFor = (type) => (type === "food" ? FOOD_CATS : NONFOOD_CATS);
 const kindFor = (type, cat) => (catsFor(type).find((c) => c.cat === cat) || {}).kind || "bookcase";
 const GIVE_CATEGORIES = NONFOOD_CATS.map((c) => c.cat);
@@ -281,6 +326,7 @@ const EMPTY_GIVE = {
   confirm: false,
   useBy: "",
   portions: 1,
+  details: {},
 };
 
 /* how long until a use-by date, in words */
@@ -982,6 +1028,9 @@ export default function Doorstep() {
     if (!give.road.trim()) next.road = "Which road is it on?";
     if (!give.address.trim()) next.address = "Only whoever claims it will see this";
     if (!give.confirm) next.confirm = "This one's non-negotiable — pavement items risk a £1,000 fine";
+    if (!give.details.condition) next.condition = "What sort of condition is it in?";
+    if (give.type !== "food" && give.cat === "Furniture" && !give.details.width)
+      next.width = "Roughly how wide is it? It's the first thing anyone asks about furniture";
     if (give.type === "food") {
       if (!give.useBy) next.useBy = "When does it need eating by?";
       else if (new Date(`${give.useBy}T23:59:59`).getTime() <= Date.now())
@@ -1003,6 +1052,7 @@ export default function Doorstep() {
           kind: kindFor(give.type, give.cat),
           useBy: give.useBy ? new Date(`${give.useBy}T23:59:59`).getTime() : null,
           portions: give.portions,
+          details: give.details,
           road: give.road,
           address: give.address,
           windowMinutes: give.hours * 60,
@@ -1401,6 +1451,38 @@ export default function Doorstep() {
                     ? "The giver will bring it down — buzz when you arrive."
                     : `It'll be waiting on the ${item.spot}, on ${item.road}.`}
                 </p>
+
+                {(() => {
+                  const rows = fieldsFor(item.type, item.cat)
+                    .map((f) => ({ label: f.label, value: item.details && item.details[f.key] }))
+                    .filter((r) => r.value !== undefined && r.value !== "" && r.value !== null)
+                    .map((r) => ({ ...r, value: typeof r.value === "number" ? `${r.value} cm` : r.value }));
+
+                  const size = ["width", "depth", "height"]
+                    .map((k) => item.details && item.details[k])
+                    .filter(Boolean);
+
+                  if (!rows.length) return null;
+                  return (
+                    <div className="spec">
+                      <p className="sub-head">Details</p>
+                      {size.length >= 2 && (
+                        <div className="spec-row spec-size">
+                          <span>Size</span>
+                          <b>{size.join(" x ")} cm</b>
+                        </div>
+                      )}
+                      {rows
+                        .filter((r) => !(size.length >= 2 && ["Width", "Depth", "Height"].includes(r.label)))
+                        .map((r) => (
+                          <div className="spec-row" key={r.label}>
+                            <span>{r.label}</span>
+                            <b>{r.value}</b>
+                          </div>
+                        ))}
+                    </div>
+                  );
+                })()}
 
                 {item.giver && !item.owner && (
                   <div className="giver-card">
@@ -2338,6 +2420,55 @@ export default function Doorstep() {
                 </>
               )}
 
+              <div className="detail-fields">
+                <p className="sub-head">The details people ask for</p>
+                <p className="detail-hint">
+                  Every one of these saves a message that this app deliberately doesn't have. Skip anything
+                  that doesn't apply.
+                </p>
+
+                {fieldsFor(give.type, give.cat).map((f) => (
+                  <div className="field" key={f.key}>
+                    <label htmlFor={`gv-${f.key}`}>
+                      {f.label}
+                      {f.type === "cm" ? " (cm)" : ""}
+                    </label>
+
+                    {f.type === "choice" ? (
+                      <div className="chips" role="group" aria-label={f.label}>
+                        {f.options.map((o) => (
+                          <button
+                            key={o}
+                            className="chip"
+                            aria-pressed={give.details[f.key] === o}
+                            onClick={() =>
+                              setGive((g) => ({
+                                ...g,
+                                details: { ...g.details, [f.key]: g.details[f.key] === o ? "" : o },
+                              }))
+                            }
+                          >
+                            {o}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <input
+                        id={`gv-${f.key}`}
+                        type={f.type === "cm" ? "number" : "text"}
+                        inputMode={f.type === "cm" ? "numeric" : undefined}
+                        value={give.details[f.key] || ""}
+                        placeholder={f.type === "cm" ? "e.g. 80" : ""}
+                        onChange={(e) =>
+                          setGive((g) => ({ ...g, details: { ...g.details, [f.key]: e.target.value } }))
+                        }
+                      />
+                    )}
+                    {f.hint && <p className="detail-hint">{f.hint}</p>}
+                  </div>
+                ))}
+              </div>
+
               <div className={`field ${giveErrors.road ? "bad" : ""}`}>
                 <label htmlFor="gv-road">Road</label>
                 <input id="gv-road" value={give.road} onChange={setG("road")} placeholder="Ellingfort Road, E8" />
@@ -2582,7 +2713,7 @@ export default function Doorstep() {
               <div className="just-gone">
                 <p className="sub-head">Just gone</p>
                 <div className="gone-strip">
-                  {recent.slice(0, 3).map((r, i) => (
+                  {recent.map((r, i) => (
                     <span key={i} className="gone-chip">
                       <span className="gone-pic">
                         {r.photoRef ? (

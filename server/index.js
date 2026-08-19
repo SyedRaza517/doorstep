@@ -59,6 +59,75 @@ const UNSAFE_FOOD_RE = new RegExp(
    Best-before is quality, not safety, so it is not enforced here. */
 const FOOD_MAX_WINDOW_MIN = 8 * 60;
 
+/* What a neighbour actually needs to know before walking over: will it fit
+   through the door, does it work, is it big enough to need two people. The
+   fields differ by category because a highchair and a floor lamp raise
+   different questions. */
+const DETAIL_FIELDS = {
+  common: [
+    { key: "condition", label: "Condition", type: "choice", options: ["New", "As good as new", "Good", "Fair", "Well used"] },
+    { key: "carry", label: "Getting it home", type: "choice", options: ["One person can carry it", "Two people", "Needs a car or van"] },
+  ],
+  Furniture: [
+    { key: "width", label: "Width", type: "cm" },
+    { key: "depth", label: "Depth", type: "cm" },
+    { key: "height", label: "Height", type: "cm" },
+    { key: "material", label: "Material", type: "choice", options: ["Wood", "Metal", "Glass", "Fabric", "Plastic", "Mixed"] },
+    { key: "colour", label: "Colour", type: "text" },
+    { key: "brand", label: "Make", type: "text" },
+    { key: "flatpack", label: "Comes apart", type: "choice", options: ["Yes, flat packs", "No, one piece"] },
+  ],
+  Kids: [
+    { key: "ages", label: "Suits ages", type: "choice", options: ["0-1", "1-3", "3-5", "5-8", "8-12", "Any age"] },
+    { key: "brand", label: "Make", type: "text" },
+    { key: "pieces", label: "All pieces there", type: "choice", options: ["Yes, complete", "Some pieces missing"] },
+    { key: "washed", label: "Cleaned", type: "choice", options: ["Yes, cleaned", "Needs a wipe"] },
+  ],
+  Garden: [
+    { key: "width", label: "Width", type: "cm" },
+    { key: "height", label: "Height", type: "cm" },
+    { key: "material", label: "Material", type: "choice", options: ["Terracotta", "Plastic", "Wood", "Metal", "Stone"] },
+    { key: "quantity", label: "How many", type: "text" },
+  ],
+  Electricals: [
+    { key: "works", label: "Working order", type: "choice", options: ["Works fine", "Works, with a fault", "Not working, for parts"] },
+    { key: "cable", label: "Cable or charger", type: "choice", options: ["Included", "Not included"] },
+    { key: "brand", label: "Make", type: "text" },
+    { key: "age", label: "Roughly how old", type: "choice", options: ["Under a year", "1-3 years", "3-5 years", "Over 5 years"] },
+  ],
+  food: [
+    { key: "storage", label: "How to keep it", type: "choice", options: ["Cupboard", "Fridge", "Freezer"] },
+    { key: "opened", label: "Packaging", type: "choice", options: ["Unopened", "Opened but sealed inside", "Loose"] },
+    { key: "diet", label: "Suitable for", type: "choice", options: ["Anyone", "Vegetarian", "Vegan"] },
+    { key: "allergens", label: "Contains", type: "text", hint: "Nuts, milk, gluten and so on — copy what the packet says" },
+  ],
+};
+
+/* which fields apply to a listing */
+function fieldsFor(type, cat) {
+  const specific = type === "food" ? DETAIL_FIELDS.food : DETAIL_FIELDS[cat] || [];
+  return [...DETAIL_FIELDS.common, ...specific];
+}
+
+/* keep only recognised keys, with sane values — this text is shown as fact */
+function cleanDetails(type, cat, input) {
+  if (!input || typeof input !== "object") return {};
+  const out = {};
+  for (const f of fieldsFor(type, cat)) {
+    const v = input[f.key];
+    if (v == null || v === "") continue;
+    if (f.type === "choice") {
+      if (f.options.includes(v)) out[f.key] = v;
+    } else if (f.type === "cm") {
+      const n = Math.round(Number(v));
+      if (Number.isFinite(n) && n > 0 && n < 1000) out[f.key] = n;
+    } else {
+      out[f.key] = String(v).trim().slice(0, 60);
+    }
+  }
+  return out;
+}
+
 /* which drawn glyph stands in when a listing has no photograph */
 const FOOD_KIND = {
   Bakery: "bread",
@@ -389,6 +458,13 @@ function publicItem(it, user, now, ctx) {
     photo: photoList(it)[0] || null,
     photos: photoList(it),
     photoRef: it.photo_ref || null,
+    details: (() => {
+      try {
+        return it.details ? JSON.parse(it.details) : {};
+      } catch {
+        return {};
+      }
+    })(),
     owner,
     lat: pin ? pin.lat : null,
     lng: pin ? pin.lng : null,
@@ -701,6 +777,7 @@ app.post(
       type = "nonfood",
       useBy = null,
       portions = 1,
+      details = null,
     } = req.body || {};
     if (!title.trim()) return fail(res, 400, "Give the item a name", "title");
     if (!address.trim()) return fail(res, 400, "We need the address the claimer will collect from", "address");
@@ -743,8 +820,8 @@ app.post(
 
     /* the item sits on the giver's own property, so it inherits their coordinates */
     const row = await one(
-      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, photo, photos, spot, postcode, lat, lng, type, use_by, portions)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
+      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, photo, photos, spot, postcode, lat, lng, type, use_by, portions, details)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
       [
         req.user.id,
         title.trim(),
@@ -765,6 +842,7 @@ app.post(
         type,
         useByAt,
         servings,
+        JSON.stringify(cleanDetails(type, cat, details)),
       ]
     );
 
@@ -794,7 +872,7 @@ app.patch(
     if (it.claimed_by != null && it.claim_expires_at > now)
       return fail(res, 409, "Someone's on their way for it — you can't change it now");
 
-    const { title, note, cat, spot, road, address, extendMinutes } = req.body || {};
+    const { title, note, cat, spot, road, address, extendMinutes, details } = req.body || {};
     if (title != null && !String(title).trim()) return fail(res, 400, "Give the item a name", "title");
     if (spot != null && !SPOTS.includes(spot)) return fail(res, 400, "Pick where the item will be waiting", "spot");
     if (title != null && BANNED_RE.test(`${title} ${note || ""}`))
@@ -805,8 +883,8 @@ app.patch(
     const expires = Math.min(it.expires_at + extra, now + 24 * 60 * 60 * 1000);
 
     const row = await one(
-      `UPDATE items SET title=$1, note=$2, cat=$3, spot=$4, road=$5, address=$6, expires_at=$7, window_ms=$8
-       WHERE id=$9 RETURNING *`,
+      `UPDATE items SET title=$1, note=$2, cat=$3, spot=$4, road=$5, address=$6, expires_at=$7, window_ms=$8, details=$9
+       WHERE id=$10 RETURNING *`,
       [
         title != null ? String(title).trim() : it.title,
         note != null ? String(note).trim() : it.note,
@@ -816,6 +894,7 @@ app.patch(
         address != null ? String(address).trim() : it.address,
         expires,
         it.window_ms + extra,
+        details ? JSON.stringify(cleanDetails(it.type, cat != null ? cat : it.cat, details)) : it.details,
         it.id,
       ]
     );
@@ -864,6 +943,13 @@ app.post(
     res.json({ ok: true, hidden });
   })
 );
+
+app.get("/api/detail-fields", (req, res) => {
+  res.json({
+    common: DETAIL_FIELDS.common,
+    byCat: Object.fromEntries(Object.entries(DETAIL_FIELDS).filter(([k]) => k !== "common")),
+  });
+});
 
 app.get("/api/categories", (req, res) => {
   res.json({

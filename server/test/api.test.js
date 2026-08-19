@@ -856,3 +856,86 @@ test("a guest gets the same paging", async () => {
   assert.equal(res.body.items.length, 3);
   assert.ok(res.body.total > 3);
 });
+
+test("a listing carries the details people would otherwise have to ask for", async () => {
+  const token = await newNeighbour("Detailed Giver");
+  const made = await call("/items", {
+    method: "POST",
+    token,
+    body: {
+      title: "Oak dining table",
+      cat: "Furniture",
+      road: "Test Road, E8",
+      address: "95 Test Road, London E8 3EP",
+      details: {
+        condition: "Good",
+        carry: "Needs a car or van",
+        width: 140,
+        depth: 80,
+        height: 75,
+        material: "Wood",
+        colour: "Oak",
+        flatpack: "No, one piece",
+        /* not a field for furniture, and not a real option — both should go */
+        storage: "Fridge",
+        nonsense: "drop me",
+      },
+    },
+  });
+  assert.equal(made.status, 201);
+  const d = made.body.details;
+  assert.equal(d.width, 140);
+  assert.equal(d.material, "Wood");
+  assert.equal(d.carry, "Needs a car or van");
+  assert.equal(d.storage, undefined, "a fridge is not a question about a table");
+  assert.equal(d.nonsense, undefined, "unknown fields are dropped");
+});
+
+test("details are checked, not just stored", async () => {
+  const token = await newNeighbour("Fibbing Giver");
+  const made = await call("/items", {
+    method: "POST",
+    token,
+    body: {
+      title: "Desk lamp",
+      cat: "Electricals",
+      road: "Test Road, E8",
+      address: "96 Test Road, London E8 3EP",
+      details: { condition: "Immaculate", works: "Works fine", cable: "Included", brand: "x".repeat(200) },
+    },
+  });
+  assert.equal(made.status, 201);
+  const d = made.body.details;
+  assert.equal(d.condition, undefined, "a condition outside the list is not kept");
+  assert.equal(d.works, "Works fine");
+  assert.ok(d.brand.length <= 60, "free text is trimmed");
+});
+
+test("food details ask food questions", async () => {
+  const token = await newNeighbour("Food Detailer");
+  const made = await call("/items", {
+    method: "POST",
+    token,
+    body: {
+      title: "Bag of apples",
+      cat: "Fruit & veg",
+      type: "food",
+      useBy: Date.now() + 3 * 86400000,
+      road: "Test Road, E8",
+      address: "97 Test Road, London E8 3EP",
+      details: { storage: "Fridge", diet: "Vegan", allergens: "None", width: 40 },
+    },
+  });
+  assert.equal(made.status, 201);
+  assert.equal(made.body.details.storage, "Fridge");
+  assert.equal(made.body.details.diet, "Vegan");
+  assert.equal(made.body.details.width, undefined, "width is not a question about apples");
+});
+
+test("the seeded neighbourhood has details on its listings", async () => {
+  const token = await signIn("demo@doorstep.uk", "doorstep123");
+  const { body } = await call("/items?cat=Furniture&limit=6", { token });
+  const withSize = body.items.filter((i) => i.details && i.details.width);
+  assert.ok(withSize.length >= 3, `expected sizes on furniture, saw ${withSize.length}`);
+  assert.ok(body.items.every((i) => i.details && i.details.condition), "every listing says what condition it is in");
+});

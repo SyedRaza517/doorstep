@@ -1006,12 +1006,30 @@
 
 .just-gone { margin-top: 22px; }
 
-/* three across, sized to the screen — a carousel here just hid two of them
-   behind the edge */
+/* A slider, so recently-taken things keep going past the edge rather than
+   stopping at three. The next card is deliberately half visible: that is
+   what tells a thumb there is more to swipe. */
 .gone-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  display: flex;
+  gap: 9px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 2px 18px 6px;
+  margin: 0 -18px;
+}
+
+.gone-strip::-webkit-scrollbar { display: none; }
+
+.gone-strip > * {
+  flex: 0 0 41%;
+  scroll-snap-align: start;
+}
+
+.gone-strip::after {
+  content: '';
+  flex: 0 0 6px;
 }
 
 .gone-chip {
@@ -2330,3 +2348,57 @@
 
 .gone-pic img { width: 100%; height: 100%; object-fit: cover; }
 .gone-chip { padding: 8px; opacity: 1; }
+
+
+/* ---------- item details ---------- */
+
+.spec {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  padding: 4px 14px;
+  margin-bottom: 16px;
+}
+
+.spec .sub-head { margin: 12px 0 6px; }
+
+.spec-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--rule);
+  font-size: 14px;
+}
+
+.spec-row:last-child { border-bottom: none; }
+.spec-row span { color: var(--hush); }
+.spec-row b { font-weight: 600; text-align: right; }
+
+.spec-size b {
+  font-family: var(--meter);
+  font-size: 14.5px;
+  color: var(--railing);
+}
+
+.detail-fields {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  padding: 4px 14px 14px;
+  margin-bottom: 16px;
+}
+
+.detail-fields .sub-head { margin: 14px 0 4px; }
+.detail-fields .chips { margin-bottom: 0; }
+.detail-fields .field { margin-bottom: 16px; }
+
+.detail-hint {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--hush);
+  margin: 0 0 12px;
+}
+
+.field .detail-hint { margin: 6px 0 0; }

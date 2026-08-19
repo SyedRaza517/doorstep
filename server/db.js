@@ -190,7 +190,8 @@ CREATE TABLE IF NOT EXISTS items (
   type             TEXT NOT NULL DEFAULT 'nonfood',
   use_by           BIGINT,
   portions         INTEGER NOT NULL DEFAULT 1,
-  photo_ref        TEXT
+  photo_ref        TEXT,
+  details          TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_items_expires ON items(expires_at);
@@ -282,6 +283,7 @@ export async function initDb() {
     ALTER TABLE items ADD COLUMN IF NOT EXISTS use_by BIGINT;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS portions INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS photo_ref TEXT;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS details TEXT;
   `);
 }
 
@@ -448,6 +450,49 @@ export async function refreshSeed() {
     );
   }
 
+  /* Plausible details for a seeded listing, derived from what it is, so the
+     demo shows the spec table doing its job rather than sitting empty. */
+  const detailsFor = (c) => {
+    const pick = (arr, seed) => arr[Math.abs(seed) % arr.length];
+    const n = c.title.length + c.road.length;
+    const d = { condition: pick(["As good as new", "Good", "Good", "Fair", "Well used"], n) };
+
+    if (c.type === "food") {
+      d.storage = c.cat === "Bakery" || c.cat === "Store cupboard" ? "Cupboard" : c.cat === "Drinks" ? "Cupboard" : "Fridge";
+      d.opened = pick(["Unopened", "Unopened", "Opened but sealed inside"], n);
+      d.diet = pick(["Anyone", "Anyone", "Vegetarian", "Vegan"], n + 1);
+      d.carry = "One person can carry it";
+      return d;
+    }
+
+    d.carry = pick(
+      ["One person can carry it", "One person can carry it", "Two people", "Needs a car or van"],
+      n + (c.cat === "Furniture" ? 2 : 0)
+    );
+
+    if (c.cat === "Furniture") {
+      d.width = 40 + (n % 120);
+      d.depth = 30 + (n % 45);
+      d.height = 45 + (n % 130);
+      d.material = pick(["Wood", "Wood", "Metal", "Fabric", "Glass", "Mixed"], n);
+      d.colour = pick(["Oak", "Pine", "White", "Black", "Grey", "Beech"], n + 3);
+      d.flatpack = pick(["Yes, flat packs", "No, one piece"], n);
+    } else if (c.cat === "Kids") {
+      d.ages = pick(["0-1", "1-3", "3-5", "5-8", "8-12", "Any age"], n);
+      d.pieces = pick(["Yes, complete", "Yes, complete", "Some pieces missing"], n);
+      d.washed = pick(["Yes, cleaned", "Needs a wipe"], n + 1);
+    } else if (c.cat === "Garden") {
+      d.width = 15 + (n % 70);
+      d.height = 15 + (n % 90);
+      d.material = pick(["Terracotta", "Plastic", "Wood", "Metal", "Stone"], n);
+    } else if (c.cat === "Electricals") {
+      d.works = pick(["Works fine", "Works fine", "Works fine", "Works, with a fault"], n);
+      d.cable = pick(["Included", "Included", "Not included"], n);
+      d.age = pick(["Under a year", "1-3 years", "3-5 years", "Over 5 years"], n + 2);
+    }
+    return d;
+  };
+
   /* The catalogue: 200 listings across twenty real Hackney roads. Each one
      takes its illustration from the shared library by slug, so two hundred
      items cost the size of thirty-odd pictures rather than two hundred. */
@@ -456,8 +501,8 @@ export async function refreshSeed() {
        two hundred listings share thirty-odd pictures, and the browser can
        cache each one once instead of receiving it in every response */
     const insert = `INSERT INTO items
-      (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, postcode, lat, lng, spot, photo, photos, type, use_by, portions, photo_ref)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`;
+      (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, postcode, lat, lng, spot, photo, photos, type, use_by, portions, photo_ref, details)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`;
 
     for (const [i, c] of CATALOGUE.entries()) {
       const coords = await geocodeSeed(c.postcode);
@@ -484,6 +529,7 @@ export async function refreshSeed() {
         c.type === "food" ? now + c.useByDays * 24 * 60 * 60 * 1000 : null,
         c.type === "food" ? c.portions : 1,
         c.photo,
+        JSON.stringify(detailsFor(c)),
       ]);
     }
   }
