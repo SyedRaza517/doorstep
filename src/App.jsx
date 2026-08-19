@@ -309,6 +309,13 @@ const milesLabel = (r) => {
   return `${r} miles`;
 };
 
+/* the home screen greets you like a neighbour, not a database */
+const greeting = (name) => {
+  const h = new Date().getHours();
+  const part = h < 12 ? "Morning" : h < 18 ? "Afternoon" : "Evening";
+  return name ? `${part}, ${name.split(" ")[0]}` : `${part}, neighbour`;
+};
+
 /* "216h ago" is not something anyone says out loud */
 const agoLabel = (mins) => {
   if (mins < 60) return `${mins} min ago`;
@@ -1894,9 +1901,15 @@ export default function Doorstep() {
                 )}
 
                 {!mine && !item.owner && (
-                  <button className="primary-btn" disabled={taken} onClick={() => claim(item)}>
-                    {taken ? "Already claimed" : "Claim it"}
-                  </button>
+                  <div className="claim-dock">
+                    <span className="claim-left">
+                      <b className={item.expiresAt - now < 15 * 60 * 1000 ? "urgent" : ""}>{formatLeft(item.expiresAt - now)}</b>
+                      <small>{taken ? "someone got there first" : "left to claim"}</small>
+                    </span>
+                    <button className="primary-btn claim-cta" disabled={taken} onClick={() => claim(item)}>
+                      {taken ? "Already claimed" : "Claim it — free"}
+                    </button>
+                  </div>
                 )}
                 {mine && (
                   <>
@@ -2137,22 +2150,36 @@ export default function Doorstep() {
             Save a search and we'll tell you the moment something appears.
           </p>
         )}
-        {notes.map((n) => (
-          <button
-            key={n.id}
-            className={`note-row ${n.read ? "" : "fresh"}`}
-            onClick={() => {
-              setDetailId(n.itemId);
-              setScreen("detail");
-            }}
-          >
-            <span className="note-title">{n.title}</span>
-            <span className="note-body">{n.body}</span>
-            <span className="note-time">
-              {new Date(n.createdAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
-            </span>
-          </button>
-        ))}
+        {notes.map((n) => {
+          /* what kind of news this is, told from the words themselves */
+          const isThanks = /thank|star/i.test(n.body) && !/wish/i.test(n.body);
+          const isWish = /wish list|claim it before/i.test(n.body);
+          return (
+            <button
+              key={n.id}
+              className={`note-row ${n.read ? "" : "unread"}`}
+              onClick={() => {
+                setDetailId(n.itemId);
+                setScreen("detail");
+              }}
+            >
+              <span className={`note-ic ${isThanks ? "thanks" : isWish ? "wish" : "plain"}`} aria-hidden="true">
+                {isThanks ? (
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 20.5S3.5 15 3.5 9.2A4.2 4.2 0 0 1 12 7a4.2 4.2 0 0 1 8.5 2.2c0 5.8-8.5 11.3-8.5 11.3Z" /></svg>
+                ) : isWish ? (
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L4.5 13.5H11L9.5 22 19 10h-6.5z" /></svg>
+                ) : (
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
+                )}
+              </span>
+              <span className="note-body">
+                <b>{n.title}</b>
+                <p>{n.body}</p>
+              </span>
+              <span className="note-when">{agoLabel(Math.max(1, Math.round((Date.now() - n.createdAt) / 60000)))}</span>
+            </button>
+          );
+        })}
         <button className="ghost-btn" onClick={() => setScreen("wishes")}>
           Manage your wish list
         </button>
@@ -2307,29 +2334,31 @@ export default function Doorstep() {
             </header>
 
             <main className="feed profile">
-              <div className="avatar" aria-hidden="true">
-                {initials}
-                <span className="avatar-dot" />
-              </div>
-              <h1 className="profile-name">{user ? user.name : ""}</h1>
-              <p className="profile-meta">{user ? user.email : ""}</p>
-              <p className="profile-meta">
-                {user ? user.postcode.toUpperCase() : ""}
-                {since ? ` · Doorstepper since ${since}` : ""}
-              </p>
+              <div className="profile-hero">
+                <div className="avatar" aria-hidden="true">
+                  {initials}
+                  <span className="avatar-dot" />
+                </div>
+                <h1 className="profile-name">{user ? user.name : ""}</h1>
+                <p className="profile-meta">{user ? user.email : ""}</p>
+                <p className="profile-meta">
+                  {user ? user.postcode.toUpperCase() : ""}
+                  {since ? ` · Doorstepper since ${since}` : ""}
+                </p>
 
-              <div className="stats-row">
-                <div className="stat-tile">
-                  <b>{stats ? stats.given : 0}</b>
-                  <span>Given away</span>
-                </div>
-                <div className="stat-tile">
-                  <b>{stats ? stats.collected : 0}</b>
-                  <span>Collected</span>
-                </div>
-                <div className={`stat-tile ${stats && stats.strikes > 0 ? "bad" : ""}`}>
-                  <b>{stats ? stats.strikes : 0}</b>
-                  <span>No-shows, 30d</span>
+                <div className="stats-row">
+                  <div className="stat-tile">
+                    <b>{stats ? stats.given : 0}</b>
+                    <span>Given away</span>
+                  </div>
+                  <div className="stat-tile">
+                    <b>{stats ? stats.collected : 0}</b>
+                    <span>Collected</span>
+                  </div>
+                  <div className={`stat-tile ${stats && stats.strikes > 0 ? "bad" : ""}`}>
+                    <b>{stats ? stats.strikes : 0}</b>
+                    <span>No-shows, 30d</span>
+                  </div>
                 </div>
               </div>
 
@@ -2356,16 +2385,34 @@ export default function Doorstep() {
 
               <div className="profile-links">
                 <button onClick={() => { setTab("toCollect"); setScreen("mine"); }}>
-                  Your things
-                  <span>To collect, collected, given, and your wish list</span>
+                  <span className="link-ic" aria-hidden="true">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 8h14l-1.2 11.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z" /><path d="M9 8V6a3 3 0 0 1 6 0v2" /></svg>
+                  </span>
+                  <span className="link-copy">
+                    Your things
+                    <span>To collect, collected, given, and your wish list</span>
+                  </span>
+                  <span className="link-go" aria-hidden="true">›</span>
                 </button>
                 <button onClick={() => setScreen("wishes")}>
-                  Add a wish
-                  <span>Get told the moment someone lists what you want</span>
+                  <span className="link-ic" aria-hidden="true">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20.5S3.5 15 3.5 9.2A4.2 4.2 0 0 1 12 7a4.2 4.2 0 0 1 8.5 2.2c0 5.8-8.5 11.3-8.5 11.3Z" /></svg>
+                  </span>
+                  <span className="link-copy">
+                    Add a wish
+                    <span>Get told the moment someone lists what you want</span>
+                  </span>
+                  <span className="link-go" aria-hidden="true">›</span>
                 </button>
                 <button onClick={() => setScreen("impact")}>
-                  What it adds up to
-                  <span>Items rehomed, waste diverted, cost avoided</span>
+                  <span className="link-ic" aria-hidden="true">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18M5.5 12.5L12 19l6.5-6.5" /></svg>
+                  </span>
+                  <span className="link-copy">
+                    What it adds up to
+                    <span>Items rehomed, waste diverted, cost avoided</span>
+                  </span>
+                  <span className="link-go" aria-hidden="true">›</span>
                 </button>
               </div>
 
@@ -2835,7 +2882,8 @@ export default function Doorstep() {
             </div>
           </header>
 
-          <main className="feed">
+          <div className="hero">
+            <p className="hero-hi">{greeting(user && user.name)}</p>
             <h1 className="feed-head">
               {liveCount}{" "}
               {typeFilter === "food"
@@ -2922,6 +2970,9 @@ export default function Doorstep() {
               )}
             </div>
 
+          </div>
+
+          <main className="feed">
             <div className="type-pills" role="group" aria-label="Food or not">
               {[
                 { v: "all", label: "Everything" },
