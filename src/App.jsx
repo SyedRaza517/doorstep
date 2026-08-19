@@ -354,6 +354,7 @@ const RADII = [
 
 const EMPTY_GIVE = {
   type: "nonfood",
+  wanted: false,
   title: "",
   note: "",
   cat: "Furniture",
@@ -470,6 +471,7 @@ export default function Doorstep() {
   const [thanking, setThanking] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [savedOnly, setSavedOnly] = useState(false);
+  const [asksOnly, setAsksOnly] = useState(false);
   /* a grid of photographs reads far better than a column of rows, which is
      what every marketplace app has settled on; the list stays for anyone who
      prefers the detail */
@@ -508,7 +510,7 @@ export default function Doorstep() {
      listings, searching only what happened to be on the current page would
      quietly miss most of the neighbourhood. */
   const fetchItems = useCallback(
-    async (t, { append = false, offset = 0, sort, search, type, cat, radius, saved, limit = 24 } = {}) => {
+    async (t, { append = false, offset = 0, sort, search, type, cat, radius, saved, asks, limit = 24 } = {}) => {
       setFeed((f) => ({ ...f, loading: true }));
       try {
         const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
@@ -518,6 +520,7 @@ export default function Doorstep() {
         if (cat && cat !== "Going soonest") params.set("cat", cat);
         if (radius && Number.isFinite(radius)) params.set("radius", String(radius));
         if (saved) params.set("saved", "1");
+        if (asks) params.set("asks", "1");
 
         const data = await api(`/items?${params}`, { token: t || undefined });
         setItems((list) => {
@@ -541,8 +544,8 @@ export default function Doorstep() {
   );
 
   const refresh = useCallback(
-    (t) => fetchItems(t ?? token, { sort, search: q, type: typeFilter, cat: filter, radius, saved: savedOnly }),
-    [fetchItems, token, sort, q, typeFilter, filter, radius, savedOnly]
+    (t) => fetchItems(t ?? token, { sort, search: q, type: typeFilter, cat: filter, radius, saved: savedOnly, asks: asksOnly }),
+    [fetchItems, token, sort, q, typeFilter, filter, radius, savedOnly, asksOnly]
   );
 
   /* Anything that needs an account routes through here: remember what they
@@ -698,7 +701,7 @@ export default function Doorstep() {
   useEffect(() => {
     if (!browsing) return;
     /* a map with only the first page of pins would look half empty */
-    const query = { sort, search: q, type: typeFilter, cat: filter, radius, saved: savedOnly, limit: screen === "map" ? 60 : 24 };
+    const query = { sort, search: q, type: typeFilter, cat: filter, radius, saved: savedOnly, asks: asksOnly, limit: screen === "map" ? 60 : 24 };
     /* debounced, so typing does not fire a request per letter */
     const first = setTimeout(() => fetchItems(token, query), q ? 300 : 0);
     const poll = setInterval(() => fetchItems(token, query), 45 * 1000);
@@ -706,7 +709,7 @@ export default function Doorstep() {
       clearTimeout(first);
       clearInterval(poll);
     };
-  }, [browsing, token, fetchItems, sort, q, typeFilter, filter, radius, savedOnly, screen]);
+  }, [browsing, token, fetchItems, sort, q, typeFilter, filter, radius, savedOnly, asksOnly, screen]);
 
   /* suggestions come from what is genuinely listed right now */
   useEffect(() => {
@@ -1386,14 +1389,16 @@ export default function Doorstep() {
 
   const submitGive = async () => {
     const next = {};
-    if (!give.title.trim()) next.title = "Give it a name — 'Pine bookcase' beats 'stuff'";
-    if (!give.road.trim()) next.road = "Which road is it on?";
-    if (!give.address.trim()) next.address = "Only whoever claims it will see this";
-    if (!give.confirm) next.confirm = "This one's non-negotiable — pavement items risk a £1,000 fine";
-    if (!give.details.condition) next.condition = "What sort of condition is it in?";
-    if (give.type !== "food" && give.cat === "Furniture" && !give.details.width)
+    if (!give.title.trim())
+      next.title = give.wanted ? "Say what you're after — 'moving boxes' beats 'help'" : "Give it a name — 'Pine bookcase' beats 'stuff'";
+    /* an ask has no doorstep, no condition, no fine to warn about */
+    if (!give.wanted && !give.road.trim()) next.road = "Which road is it on?";
+    if (!give.wanted && !give.address.trim()) next.address = "Only whoever claims it will see this";
+    if (!give.wanted && !give.confirm) next.confirm = "This one's non-negotiable — pavement items risk a £1,000 fine";
+    if (!give.wanted && !give.details.condition) next.condition = "What sort of condition is it in?";
+    if (!give.wanted && give.type !== "food" && give.cat === "Furniture" && !give.details.width)
       next.width = "Roughly how wide is it? It's the first thing anyone asks about furniture";
-    if (give.type === "food") {
+    if (!give.wanted && give.type === "food") {
       if (!give.useBy) next.useBy = "When does it need eating by?";
       else if (new Date(`${give.useBy}T23:59:59`).getTime() <= Date.now())
         next.useBy = "That date has passed — food past its use-by can't be passed on";
@@ -1420,6 +1425,7 @@ export default function Doorstep() {
           windowMinutes: give.hours * 60,
           photos: give.photos,
           spot: give.spot,
+          wanted: give.wanted,
         },
       });
       setItems((list) => [...list, created]);
@@ -1427,11 +1433,13 @@ export default function Doorstep() {
       setAutospec((a) => ({ ...a, done: false }));
       setScreen("home");
       setToast(
-        created.wishers > 0
-          ? created.wishers === 1
-            ? `Listed — and one neighbour who wished for it has just been told.`
-            : `Listed — and ${created.wishers} neighbours who wished for it have just been told.`
-          : `On the doorstep for ${give.hours} hours. Neighbours nearby can see it now.`
+        give.wanted
+          ? "Your ask is up. Anyone nearby with one can message you directly."
+          : created.wishers > 0
+            ? created.wishers === 1
+              ? `Listed — and one neighbour who wished for it has just been told.`
+              : `Listed — and ${created.wishers} neighbours who wished for it have just been told.`
+            : `On the doorstep for ${give.hours} hours. Neighbours nearby can see it now.`
       );
     } catch (e) {
       setGiveErrors(e.field ? { [e.field]: e.message } : { _form: e.message });
@@ -1968,7 +1976,30 @@ export default function Doorstep() {
                   </div>
                 )}
 
-                {!mine && !item.owner && (
+                {item.wanted && !item.owner && (
+                  <div className="claim-dock">
+                    <span className="claim-left">
+                      <b>{formatLeft(item.expiresAt - now)}</b>
+                      <small>ask still open</small>
+                    </span>
+                    <button
+                      className="primary-btn claim-cta"
+                      onClick={async () => {
+                        if (needsAccount("Sign in to offer yours", { action: "detail" })) return;
+                        try {
+                          const d = await api(`/items/${item.id}/offer`, { method: "POST", token });
+                          setChatId(d.conversationId);
+                          setScreen("chat");
+                        } catch (e) {
+                          setToast(e.message);
+                        }
+                      }}
+                    >
+                      I have one — message {item.giver ? item.giver.name : "them"}
+                    </button>
+                  </div>
+                )}
+                {!item.wanted && !mine && !item.owner && (
                   <div className="claim-dock">
                     <span className="claim-left">
                       <b className={item.expiresAt - now < 15 * 60 * 1000 ? "urgent" : ""}>{formatLeft(item.expiresAt - now)}</b>
@@ -2837,6 +2868,8 @@ export default function Doorstep() {
 
             <main className="feed give-form">
               <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple hidden onChange={onPhoto} />
+              {!give.wanted && (
+              <>
               <button
                 className={`photo-box ${give.photos.length ? "has-photo" : ""}`}
                 onClick={() => fileRef.current && fileRef.current.click()}
@@ -2886,24 +2919,28 @@ export default function Doorstep() {
                   </button>
                 </div>
               )}
+              </>
+              )}
 
               <div className="field">
-                <label>What are you passing on</label>
-                <div className="type-pills" role="group" aria-label="Food or not">
+                <label>What's happening</label>
+                <div className="type-pills" role="group" aria-label="Giving or asking">
                   {[
-                    { v: "nonfood", label: "Something" },
-                    { v: "food", label: "Food" },
+                    { v: "nonfood", label: "Giving away", wanted: false },
+                    { v: "food", label: "Giving food", wanted: false },
+                    { v: "nonfood", label: "I'm after it", wanted: true },
                   ].map((t) => (
                     <button
-                      key={t.v}
+                      key={t.label}
                       className="type-pill"
-                      aria-pressed={give.type === t.v}
+                      aria-pressed={give.type === t.v && give.wanted === t.wanted}
                       onClick={() =>
                         setGive((g) => ({
                           ...g,
                           type: t.v,
+                          wanted: t.wanted,
                           cat: catsFor(t.v)[0].cat,
-                          hours: t.v === "food" ? 4 : 2,
+                          hours: t.wanted ? 24 : t.v === "food" ? 4 : 2,
                         }))
                       }
                     >
@@ -2957,6 +2994,8 @@ export default function Doorstep() {
                 )}
               </div>
 
+              {!give.wanted && (
+              <>
               <div className="field">
                 <label>Where will it wait</label>
                 <div className="chips" role="group" aria-label="Collection spot">
@@ -3012,6 +3051,10 @@ export default function Doorstep() {
                 </>
               )}
 
+              </>
+              )}
+
+              {!give.wanted && (
               <div className="detail-fields">
                 <p className="sub-head">The details people ask for</p>
                 <p className="detail-hint">
@@ -3061,6 +3104,10 @@ export default function Doorstep() {
                 ))}
               </div>
 
+              )}
+
+              {!give.wanted && (
+              <>
               <div className={`field ${giveErrors.road ? "bad" : ""}`}>
                 <label htmlFor="gv-road">Road</label>
                 <input id="gv-road" value={give.road} onChange={setG("road")} placeholder="Ellingfort Road, E8" />
@@ -3072,11 +3119,19 @@ export default function Doorstep() {
                 <input id="gv-address" value={give.address} onChange={setG("address")} placeholder="14 Ellingfort Road, London E8 3PA" />
                 {giveErrors.address && <p className="field-note">{giveErrors.address}</p>}
               </div>
+              </>
+              )}
 
               <div className="field">
-                <label>How long</label>
+                <label>{give.wanted ? "How long should the ask stay up" : "How long"}</label>
                 <div className="chips" role="group" aria-label="Listing window">
-                  {(give.type === "food"
+                  {(give.wanted
+                    ? [
+                        { h: 24, label: "A day" },
+                        { h: 48, label: "Two days" },
+                        { h: 72, label: "Three days" },
+                      ]
+                    : give.type === "food"
                     ? [
                         { h: 2, label: "2 hours" },
                         { h: 4, label: "4 hours" },
@@ -3099,6 +3154,7 @@ export default function Doorstep() {
                 </div>
               </div>
 
+              {!give.wanted && (
               <label className={`confirm-row ${giveErrors.confirm ? "bad" : ""}`}>
                 <input
                   type="checkbox"
@@ -3111,10 +3167,11 @@ export default function Doorstep() {
                 />
                 <span>It'll wait on my own property — doorstep, garden, porch or lobby. Never the pavement.</span>
               </label>
+              )}
               {giveErrors.confirm && <p className="field-note">{giveErrors.confirm}</p>}
 
               <button className="primary-btn" onClick={submitGive} disabled={busy}>
-                {busy ? "Listing" : "Put it on the doorstep"}
+                {busy ? (give.wanted ? "Asking" : "Listing") : give.wanted ? "Put the ask up" : "Put it on the doorstep"}
               </button>
               {giveErrors._form && <p className="field-note form-note">{giveErrors._form}</p>}
             </main>
@@ -3317,6 +3374,14 @@ export default function Doorstep() {
                 </button>
               </div>
 
+              <button className="saved-toggle" aria-pressed={asksOnly} onClick={() => setAsksOnly((v) => !v)}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 17h.01" />
+                  <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.4-3 4" />
+                  <circle cx="12" cy="12" r="9.2" />
+                </svg>
+                Asks
+              </button>
               <button className="saved-toggle" aria-pressed={savedOnly} onClick={() => setSavedOnly((v) => !v)}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill={savedOnly ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
                   <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z" />
@@ -3493,7 +3558,8 @@ export default function Doorstep() {
                         )}
                         <span className={`gcard-timer ${urgent ? "urgent" : ""}`}>{formatLeft(remaining)}</span>
                         {item.dist && <span className="gcard-dist">{item.dist}</span>}
-                        {item.type === "food" && !gone && !mine && !item.owner && (
+                        {item.wanted && <span className="gcard-want">Wanted</span>}
+                        {item.type === "food" && !item.wanted && !gone && !mine && !item.owner && (
                           <span className="gcard-food">Food</span>
                         )}
                         {(gone || mine || item.owner) && (

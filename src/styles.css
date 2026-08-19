@@ -3298,3 +3298,19 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
 /* the controls strip snaps by group, like every other scroller here */
 .scroll-strip { scroll-snap-type: x proximity; }
 .scroll-strip .controls-row > * { scroll-snap-align: start; }
+
+/* an ask wears its difference: dashed edge, WANTED flash, no pretence of a photo */
+.gcard-want {
+  position: absolute;
+  left: 7px;
+  top: 7px;
+  font-family: var(--body);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--signal);
+  border-radius: 20px;
+  padding: 3px 8px;
+}

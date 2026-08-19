@@ -1112,3 +1112,41 @@ test("away mode hides your listings until you're back", async () => {
   await call("/me", { method: "PATCH", token: giver, body: { away: false } });
   assert.equal(await sees(), true, "back means back");
 });
+
+test("an ask is not an offer: separate feed, no claim, answered with a message", async () => {
+  const asker = await newNeighbour("Asking Neighbour");
+  const helper = await newNeighbour("Helpful Neighbour");
+
+  const ask = await call("/items", {
+    method: "POST",
+    token: asker,
+    body: { title: "Quixotic flugelhorn case", note: "Long shot, but you never know.", cat: "Furniture", wanted: true, windowMinutes: 48 * 60 },
+  });
+  assert.equal(ask.status, 201, "an ask needs no address and no photo");
+  assert.equal(ask.body.wanted, true);
+
+  /* it lives in the asks feed, not the offers feed */
+  const offers = await call("/items?q=flugelhorn", { token: helper });
+  assert.equal(offers.body.items.length, 0, "asks stay out of the offers feed");
+  const asks = await call("/items?q=flugelhorn&asks=1", { token: helper });
+  assert.equal(asks.body.items.length, 1, "and appear in the asks feed");
+
+  /* nobody can claim a thing that doesn't exist yet */
+  const claimed = await call(`/items/${ask.body.id}/claim`, { method: "POST", token: helper });
+  assert.equal(claimed.status, 400);
+
+  /* "I have one" opens the thread */
+  const offer = await call(`/items/${ask.body.id}/offer`, { method: "POST", token: helper });
+  assert.equal(offer.status, 201);
+  assert.ok(offer.body.conversationId > 0);
+  const thread = await call(`/chats/${offer.body.conversationId}`, { token: asker });
+  assert.ok(thread.body.messages.some((m) => m.system && /has one for you/.test(m.body)));
+
+  /* offering twice reuses the same thread rather than spamming */
+  const again = await call(`/items/${ask.body.id}/offer`, { method: "POST", token: helper });
+  assert.equal(again.body.conversationId, offer.body.conversationId);
+
+  /* your own ask takes no offer from you */
+  const own = await call(`/items/${ask.body.id}/offer`, { method: "POST", token: asker });
+  assert.equal(own.status, 400);
+});

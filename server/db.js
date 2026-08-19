@@ -426,6 +426,15 @@ const SEED_FOOD = [
   { giver: 1, title: "Two cartons of oat milk", note: "Unopened, we switched brands.", cat: "Drinks", kind: "drink", road: "Parkholme Road, E8", postcode: "E8 3AG", lat: 51.54462, lng: -0.06863, address: "34 Parkholme Road, London E8 3AG", left: 45, spot: "porch", portions: 2, useByDays: 9 },
 ];
 
+/* Asks: things neighbours are after. A young feed with only twenty offers
+   still feels alive if people can be seen wanting. */
+const SEED_ASKS = [
+  { giver: 0, title: "Moving boxes, any size", note: "We're packing up the flat this weekend — flattened ones are perfect.", cat: "Furniture", kind: "bookcase", road: "Wilton Way, E8", postcode: "E8 3PZ", hours: 48 },
+  { giver: 1, title: "Spare plant pots", note: "Repotting season. Terracotta or plastic, any state, will collect.", cat: "Garden", kind: "garden", road: "Middleton Road, E8", postcode: "E8 4LN", hours: 72 },
+  { giver: 2, title: "Toddler wellies, size 8", note: "Puddle season is upon us and she's outgrown hers overnight.", cat: "Kids", kind: "toys", road: "Albion Drive, E8", postcode: "E8 4ET", hours: 48 },
+  { giver: 0, title: "A few jam jars with lids", note: "Making chutney, ran out of jars. Half a dozen would do.", cat: "Store cupboard", kind: "tin", road: "Shrubland Road, E8", postcode: "E8 4NN", hours: 24 },
+];
+
 /* Coordinates for a seeded postcode: cached first, then postcodes.io, then
    the middle of London Fields so a seed never fails on a bad connection. */
 async function geocodeSeed(postcode) {
@@ -664,6 +673,29 @@ export async function refreshSeed() {
         at,
         g.pic,
         g.type || "nonfood",
+      ]
+    );
+  }
+
+  /* live asks */
+  for (const [i, a] of SEED_ASKS.entries()) {
+    const coords = await geocodeSeed(a.postcode);
+    await query(
+      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, postcode, lat, lng, spot, type, wanted)
+       VALUES ($1,$2,$3,$4,$5,$6,'','',$7,$8,$9,$10,$11,$12,'doorstep','nonfood',TRUE)`,
+      [
+        giverIds[a.giver],
+        a.title,
+        a.note,
+        a.cat,
+        a.kind,
+        a.road,
+        a.hours * 60 * 60 * 1000,
+        now + a.hours * 60 * 60 * 1000 - i * 37 * 60 * 1000,
+        now - i * 41 * 60 * 1000,
+        a.postcode,
+        coords.lat,
+        coords.lng,
       ]
     );
   }

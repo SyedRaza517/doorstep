@@ -326,7 +326,7 @@ async function notifyExistingMatches(wish) {
   const live = (
     await query(
       `SELECT * FROM items
-       WHERE expires_at > $1 AND hidden_at IS NULL AND collected_at IS NULL
+       WHERE expires_at > $1 AND hidden_at IS NULL AND collected_at IS NULL AND NOT wanted
          AND owner_id <> $2
          AND owner_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = $2)
        ORDER BY expires_at`,
@@ -480,6 +480,7 @@ function publicItem(it, user, now, ctx) {
     cat: it.cat,
     kind: it.kind,
     type: it.type || "nonfood",
+    wanted: it.wanted === true,
     useBy: num(it.use_by),
     portions: num(it.portions) || 1,
     dist: miles != null ? formatMiles(miles) : it.dist,
@@ -701,6 +702,8 @@ app.get(
        quietly miss most of the neighbourhood. */
     const params = [now];
     let clause = "expires_at > $1";
+    /* offers and asks are different feeds — nobody wants them shuffled */
+    clause += req.query.asks === "1" ? " AND wanted" : " AND NOT wanted";
     /* a giver who is away has stepped out — their doorstep has nothing on it */
     clause += ` AND owner_id NOT IN (SELECT id FROM users WHERE away_until IS NOT NULL AND away_until > ${Number(now)})`;
     if (req.guest) {
@@ -886,9 +889,12 @@ app.post(
       useBy = null,
       portions = 1,
       details = null,
+      wanted = false,
     } = req.body || {};
-    if (!title.trim()) return fail(res, 400, "Give the item a name", "title");
-    if (!address.trim()) return fail(res, 400, "We need the address the claimer will collect from", "address");
+    const isAsk = wanted === true;
+    if (!title.trim()) return fail(res, 400, isAsk ? "Say what you're after" : "Give the item a name", "title");
+    /* an ask has no doorstep — nothing is waiting anywhere yet */
+    if (!isAsk && !address.trim()) return fail(res, 400, "We need the address the claimer will collect from", "address");
     const shots = validPhotos(photos != null ? photos : photo);
     if (!shots.ok) return fail(res, 400, shots.error, "photo");
     if (!SPOTS.includes(spot)) return fail(res, 400, "Pick where the item will be waiting", "spot");
@@ -920,16 +926,17 @@ app.post(
       );
 
     const now = Date.now();
-    const capMin = type === "food" ? FOOD_MAX_WINDOW_MIN : 24 * 60;
-    let windowMs = Math.max(15, Math.min(capMin, Number(windowMinutes) || DEFAULT_WINDOW_MIN)) * 60 * 1000;
+    /* an ask can wait longer than a melting doorstep listing: up to three days */
+    const capMin = isAsk ? 3 * 24 * 60 : type === "food" ? FOOD_MAX_WINDOW_MIN : 24 * 60;
+    let windowMs = Math.max(15, Math.min(capMin, Number(windowMinutes) || (isAsk ? 24 * 60 : DEFAULT_WINDOW_MIN))) * 60 * 1000;
     /* a listing must never outlive the food it describes */
     if (type === "food" && now + windowMs > useByAt) windowMs = Math.max(15 * 60 * 1000, useByAt - now);
     const servings = Math.max(1, Math.min(20, Number(portions) || 1));
 
     /* the item sits on the giver's own property, so it inherits their coordinates */
     const row = await one(
-      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, photo, photos, spot, postcode, lat, lng, type, use_by, portions, details)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
+      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, photo, photos, spot, postcode, lat, lng, type, use_by, portions, details, wanted)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING *`,
       [
         req.user.id,
         title.trim(),
@@ -951,19 +958,23 @@ app.post(
         useByAt,
         servings,
         JSON.stringify(cleanDetails(type, cat, details)),
+        isAsk,
       ]
     );
 
-    /* remember it, so the next listing is prefilled */
-    await query("UPDATE users SET address = $1, road = $2, spot = $3 WHERE id = $4", [
-      address.trim(),
-      road.trim() || req.user.road,
-      spot,
-      req.user.id,
-    ]);
+    /* remember it, so the next listing is prefilled — but an ask carries no
+       address, and must not blank the one already stored */
+    if (!isAsk) {
+      await query("UPDATE users SET address = $1, road = $2, spot = $3 WHERE id = $4", [
+        address.trim(),
+        road.trim() || req.user.road,
+        spot,
+        req.user.id,
+      ]);
+    }
 
     const item = castItem(row);
-    const wishers = await notifyMatchingWishes(item, req.user.id);
+    const wishers = isAsk ? 0 : await notifyMatchingWishes(item, req.user.id);
     res.status(201).json({ ...(await publicOne(item, req.user, now)), wishers });
   })
 );
@@ -1072,7 +1083,7 @@ app.get(
     const rows = await query(
       `SELECT title, cat, type, COUNT(*) OVER () AS _n
        FROM items
-       WHERE expires_at > $1 AND hidden_at IS NULL AND title ILIKE $2
+       WHERE expires_at > $1 AND hidden_at IS NULL AND NOT wanted AND title ILIKE $2
        ORDER BY expires_at LIMIT 6`,
       [now, `%${q}%`]
     );
@@ -1142,7 +1153,7 @@ async function liveMatchCounts(wishes, user) {
   if (!wishes.length) return new Map();
   const live = await query(
     `SELECT id, title, note, road, cat, lat, lng FROM items
-     WHERE owner_id <> $1 AND claimed_by IS NULL AND expires_at > $2 AND hidden_at IS NULL`,
+     WHERE owner_id <> $1 AND claimed_by IS NULL AND expires_at > $2 AND hidden_at IS NULL AND NOT wanted`,
     [user.id, Date.now()]
   );
   const counts = new Map();
@@ -1479,6 +1490,37 @@ app.post(
   })
 );
 
+/* An ask's answer: "I have one." No hold, no countdown — just the two of
+   them in a thread, because the thing hasn't been photographed or listed,
+   it's still in someone's hallway. */
+app.post(
+  "/api/items/:id/offer",
+  auth,
+  wrap(async (req, res) => {
+    const now = Date.now();
+    const it = castItem(await one("SELECT * FROM items WHERE id = $1", [req.params.id]));
+    if (!it || !it.wanted) return fail(res, 404, "That isn't an ask");
+    if (it.expires_at <= now) return fail(res, 410, "This ask has closed");
+    if (it.owner_id === req.user.id) return fail(res, 400, "It's your own ask");
+
+    const convId = await openThread(it, req.user.id, now);
+    const fresh = await one(
+      "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = $1",
+      [convId]
+    );
+    if (num(fresh.n) === 0) {
+      await threadNote(convId, `${req.user.name.split(/[ ]+/)[0]} has one for you — arrange it here.`, now);
+      pushTo(num(it.owner_id), {
+        type: "message",
+        conversationId: convId,
+        body: `${req.user.name.split(/[ ]+/)[0]} has a ${it.title.toLowerCase()} for you`,
+        createdAt: now,
+      });
+    }
+    res.status(201).json({ conversationId: convId });
+  })
+);
+
 /* ---- claiming ---- */
 
 app.post(
@@ -1521,6 +1563,7 @@ app.post(
       const it = castItem(raw);
       if (!it) return { status: 404, error: "That item doesn't exist" };
       if (it.hidden_at != null) return { status: 410, error: "That listing is under review" };
+      if (it.wanted) return { status: 400, error: "This is something they're after — offer yours instead" };
       if (it.expires_at <= now) return { status: 410, error: "Too late — the window has closed" };
       if (it.owner_id === req.user.id) return { status: 400, error: "That one's already yours — you listed it" };
       const claimActive = it.claimed_by != null && it.claim_expires_at > now;
