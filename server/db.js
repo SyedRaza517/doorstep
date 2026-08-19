@@ -1,4 +1,18 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+/* Illustrations for the demo listings, generated once and committed so a
+   fresh database looks like a real neighbourhood rather than a wireframe. */
+let SEED_PHOTOS = {};
+try {
+  SEED_PHOTOS = JSON.parse(fs.readFileSync(path.join(here, "seed-photos.json"), "utf8"));
+} catch {
+  /* no illustrations available — the app falls back to its drawn glyphs */
+}
 
 /* Postgres, two ways.
    In production DATABASE_URL points at Supabase and we use `pg`.
@@ -323,21 +337,42 @@ export async function refreshSeed() {
   }
 
   const windowMs = 2 * 60 * 60 * 1000;
+  const listed = {};
   for (const it of SEED_ITEMS) {
-    await query(
-      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, postcode, lat, lng, spot)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14)`,
-      [giverIds[it.giver], it.title, it.note, it.cat, it.kind, it.road, it.address, windowMs, now + it.left * 60 * 1000, now, it.postcode, it.lat, it.lng, it.spot]
+    const shots = SEED_PHOTOS[it.title] || [];
+    const row = await one(
+      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, postcode, lat, lng, spot, photo, photos)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+      [
+        giverIds[it.giver],
+        it.title,
+        it.note,
+        it.cat,
+        it.kind,
+        it.road,
+        it.address,
+        windowMs,
+        now + it.left * 60 * 1000,
+        now,
+        it.postcode,
+        it.lat,
+        it.lng,
+        it.spot,
+        shots[0] || null,
+        JSON.stringify(shots),
+      ]
     );
+    listed[it.title] = Number(row.id);
   }
 
   /* collected history, owned by the seed givers and taken by the demo user */
+  const history = {};
   for (const [i, h] of SEED_HISTORY.entries()) {
     const at = now - h.daysAgo * 24 * 60 * 60 * 1000;
     const coords = await one("SELECT lat, lng FROM postcode_cache WHERE postcode = $1", [h.postcode.replace(/\s+/g, "")]);
-    await query(
+    const hist = await one(
       `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, postcode, lat, lng, spot, claimed_by, claim_expires_at, collected_at)
-       VALUES ($1,$2,'',$3,$4,$5,$6,'',$7,$8,$9,$10,$11,$12,'doorstep',$13,$14,$15)`,
+       VALUES ($1,$2,'',$3,$4,$5,$6,'',$7,$8,$9,$10,$11,$12,'doorstep',$13,$14,$15) RETURNING id`,
       [
         giverIds[i % giverIds.length],
         h.title,
@@ -355,6 +390,162 @@ export async function refreshSeed() {
         at,
         at,
       ]
+    );
+    history[h.title] = Number(hist.id);
+  }
+
+  await seedActivity({ now, demoId, giverIds, listed, history });
+}
+
+/* Everything else a demo needs: a claim on the go, a couple of saved items,
+   a wish list with a hit against it, thanks already sent, and the alerts
+   those actions produce. Without this the personal screens are all empty and
+   the app looks half-finished on first run. */
+async function seedActivity({ now, demoId, giverIds, listed, history }) {
+  const wipe = [
+    ["saves", "user_id"],
+    ["wishes", "user_id"],
+    ["notifications", "user_id"],
+    ["thanks", "from_id"],
+  ];
+  await query("DELETE FROM wish_hits WHERE wish_id IN (SELECT id FROM wishes WHERE user_id = $1)", [demoId]);
+  for (const [table, col] of wipe) await query(`DELETE FROM ${table} WHERE ${col} = $1`, [demoId]);
+
+  /* one item already claimed, so "To collect" has something in it and the
+     30-minute hold is visibly ticking */
+  const claiming = listed["Kids balance bike"];
+  if (claiming) {
+    await query("UPDATE items SET claimed_by = $1, claim_expires_at = $2 WHERE id = $3", [
+      demoId,
+      now + 22 * 60 * 1000,
+      claiming,
+    ]);
+  }
+
+  /* two things saved for later */
+  for (const title of ["Pine bookcase", "Monstera in ceramic pot"]) {
+    if (listed[title]) {
+      await query("INSERT INTO saves (user_id, item_id, created_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [
+        demoId,
+        listed[title],
+        now - 20 * 60 * 1000,
+      ]);
+    }
+  }
+
+  /* a wish list, one of which has already turned something up */
+  const wishes = [
+    { keyword: "desk", cat: "Furniture", radius: 1 },
+    { keyword: "lamp", cat: "Anything", radius: 2 },
+    { keyword: "", cat: "Kids", radius: 0.5 },
+  ];
+  const wishIds = [];
+  for (const w of wishes) {
+    const row = await one(
+      "INSERT INTO wishes (user_id, keyword, cat, radius, created_at) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+      [demoId, w.keyword, w.cat, w.radius, now - 3 * 24 * 60 * 60 * 1000]
+    );
+    wishIds.push(Number(row.id));
+  }
+
+  /* the lamp wish matched the standing lamp that is live right now */
+  const lampWish = wishIds[1];
+  const lamp = listed["Standing lamp"];
+  if (lampWish && lamp) {
+    await query("INSERT INTO wish_hits (wish_id, item_id, at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [
+      lampWish,
+      lamp,
+      now - 25 * 60 * 1000,
+    ]);
+    await query(
+      "INSERT INTO notifications (user_id, item_id, title, body, created_at, read_at) VALUES ($1,$2,$3,$4,$5,NULL)",
+      [
+        demoId,
+        lamp,
+        "Standing lamp",
+        "On your wish list, and it's already up — 1.3 mi away on Stoke Newington High Street, N16.",
+        now - 25 * 60 * 1000,
+      ]
+    );
+  }
+
+  /* an older alert, already read, so the list is not all unread */
+  if (listed["Baby bath + stand"]) {
+    await query(
+      "INSERT INTO notifications (user_id, item_id, title, body, created_at, read_at) VALUES ($1,$2,$3,$4,$5,$6)",
+      [
+        demoId,
+        listed["Baby bath + stand"],
+        "Baby bath + stand",
+        "0.3 mi away on Parkholme Road, E8 — claim it before the window closes.",
+        now - 90 * 60 * 1000,
+        now - 80 * 60 * 1000,
+      ]
+    );
+  }
+
+  /* things the demo user has put out themselves, so "Given" is not empty:
+     one live, one that nobody took (which is the route into the charity
+     fallback), and one already collected with a thank-you against it */
+  await query("DELETE FROM thanks WHERE to_id = $1", [demoId]);
+  const mineStale = await query("SELECT id FROM items WHERE owner_id = $1", [demoId]);
+  const mineIds = mineStale.map((r) => r.id);
+  if (mineIds.length) {
+    for (const t of ["saves", "wish_hits", "reports", "thanks"]) {
+      await query(`DELETE FROM ${t} WHERE item_id = ANY($1::bigint[])`, [mineIds]);
+    }
+    await query("DELETE FROM notifications WHERE item_id = ANY($1::bigint[])", [mineIds]);
+    await query("DELETE FROM no_shows WHERE item_id = ANY($1::bigint[])", [mineIds]);
+    await query("DELETE FROM items WHERE id = ANY($1::bigint[])", [mineIds]);
+  }
+
+  const home = { road: "Gayhurst Road, E8", postcode: "E8 3EN", lat: 51.54237, lng: -0.06258, address: "18 Gayhurst Road, London E8 3EN" };
+  const windowMs2 = 2 * 60 * 60 * 1000;
+  const mine = [
+    { title: "Cane laundry basket", note: "Lid included, one small split in the weave.", cat: "Furniture", kind: "bookcase", spot: "porch", expires: now + 74 * 60 * 1000, collected: null },
+    { title: "Box of picture frames", note: "Eight frames, mixed sizes, glass all intact.", cat: "Furniture", kind: "bookcase", spot: "doorstep", expires: now - 3 * 60 * 60 * 1000, collected: null },
+    { title: "Toddler trike", note: "Push handle detaches. Went to a family on Wilton Way.", cat: "Kids", kind: "bike", spot: "front garden", expires: now - 26 * 60 * 60 * 1000, collected: now - 26 * 60 * 60 * 1000 },
+  ];
+
+  for (const m of mine) {
+    const shots = SEED_PHOTOS[m.title] || [];
+    const row = await one(
+      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, postcode, lat, lng, spot, photo, photos, claimed_by, claim_expires_at, collected_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
+      [
+        demoId, m.title, m.note, m.cat, m.kind, home.road, home.address, windowMs2,
+        m.expires, m.expires - windowMs2, home.postcode, home.lat, home.lng, m.spot,
+        shots[0] || null, JSON.stringify(shots),
+        m.collected ? giverIds[0] : null,
+        m.collected ? m.collected : null,
+        m.collected,
+      ]
+    );
+    /* the trike earned a thank-you from the neighbour who took it */
+    if (m.collected) {
+      await query(
+        "INSERT INTO thanks (item_id, from_id, to_id, token, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
+        [Number(row.id), giverIds[0], demoId, "star", m.collected + 5 * 60 * 1000]
+      );
+      await query(
+        "INSERT INTO notifications (user_id, item_id, title, body, created_at, read_at) VALUES ($1,$2,$3,$4,$5,$6)",
+        [demoId, Number(row.id), "Thank you", "Maya says you're a star for the toddler trike.", m.collected + 5 * 60 * 1000, now - 60 * 60 * 1000]
+      );
+    }
+  }
+
+  /* thanks already sent for two of the things collected earlier */
+  const thanksFor = [
+    ["Bookshelf", "brew"],
+    ["Garden bench", "plant"],
+  ];
+  for (const [title, token] of thanksFor) {
+    const itemId = history[title];
+    if (!itemId) continue;
+    const owner = await one("SELECT owner_id FROM items WHERE id = $1", [itemId]);
+    await query(
+      "INSERT INTO thanks (item_id, from_id, to_id, token, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
+      [itemId, demoId, owner.owner_id, token, now - 4 * 24 * 60 * 60 * 1000]
     );
   }
 }

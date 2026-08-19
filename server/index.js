@@ -223,6 +223,22 @@ const auth = wrap(async (req, res, next) => {
   next();
 });
 
+/* Browsing needs no account. Nextdoor, Gumtree and Freegle all let people
+   look before they join, and an empty-handed sign-up wall is the surest way
+   to lose someone who just wanted to see whether anything is going nearby.
+   A guest sees the same listings, minus anything personal to them. */
+const GUEST = { id: -1, lat: null, lng: null, guest: true };
+
+const maybeAuth = wrap(async (req, res, next) => {
+  const token = (req.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+  const row = token
+    ? await one("SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1", [token])
+    : null;
+  req.user = row ? castUser(row) : GUEST;
+  req.guest = !row;
+  next();
+});
+
 async function startSession(user) {
   const token = newToken();
   await query("INSERT INTO sessions (token, user_id, created_at) VALUES ($1,$2,$3)", [token, user.id, Date.now()]);
@@ -434,22 +450,24 @@ async function sweepLapsedClaims(now) {
 
 app.get(
   "/api/items",
-  auth,
+  maybeAuth,
   wrap(async (req, res) => {
     const now = Date.now();
     await sweepLapsedClaims(now);
     const rows = (
-      await query(
-        `SELECT * FROM items
-         WHERE expires_at > $1
-           AND (hidden_at IS NULL OR owner_id = $2)
-           AND owner_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = $2)
-         ORDER BY expires_at`,
-        [now, req.user.id]
-      )
+      req.guest
+        ? await query("SELECT * FROM items WHERE expires_at > $1 AND hidden_at IS NULL ORDER BY expires_at", [now])
+        : await query(
+            `SELECT * FROM items
+             WHERE expires_at > $1
+               AND (hidden_at IS NULL OR owner_id = $2)
+               AND owner_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = $2)
+             ORDER BY expires_at`,
+            [now, req.user.id]
+          )
     ).map(castItem);
     const ctx = await itemContext(rows, req.user);
-    res.json({ items: rows.map((it) => publicItem(it, req.user, now, ctx)) });
+    res.json({ items: rows.map((it) => publicItem(it, req.user, now, ctx)), guest: req.guest });
   })
 );
 
@@ -457,7 +475,7 @@ app.get(
    Olio's "Just Gone" carousel, minus the tease of showing an address */
 app.get(
   "/api/items/recent",
-  auth,
+  maybeAuth,
   wrap(async (req, res) => {
     const now = Date.now();
     const rows = await query(

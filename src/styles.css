@@ -136,6 +136,13 @@
 .field input:focus { border-color: var(--railing); outline-offset: 1px; }
 .field.bad input { border-color: var(--brick); }
 
+.field-ok {
+  font-size: 13px;
+  color: var(--railing);
+  font-weight: 500;
+  margin-top: 5px;
+}
+
 .field-note {
   font-size: 13px;
   color: var(--brick);
@@ -195,6 +202,24 @@
 .primary-btn:disabled { opacity: 0.65; cursor: default; }
 
 .form-note { text-align: center; margin-top: 10px; }
+
+.browse-back {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  font-family: var(--body);
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--railing);
+  background: transparent;
+  border: 1.5px solid var(--rule);
+  border-radius: 10px;
+  padding: 13px;
+  cursor: pointer;
+  transition: border-color .15s;
+}
+
+.browse-back:hover { border-color: var(--railing); }
 
 .swap {
   margin-top: 20px;

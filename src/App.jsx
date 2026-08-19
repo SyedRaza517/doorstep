@@ -236,9 +236,14 @@ function whereLine(item) {
 export default function Doorstep() {
   const [token, setToken] = useState(() => localStorage.getItem("ds_token"));
   const [user, setUser] = useState(null);
-  const [screen, setScreen] = useState(token ? "loading" : "auth");
+  /* Browsing needs no account: the app opens on the feed and only asks who
+     you are at the moment you try to claim or give something. A sign-up wall
+     in front of an empty-handed visitor is the surest way to lose them. */
+  const [screen, setScreen] = useState(token ? "loading" : "home");
+  const [pending, setPending] = useState(null);
+  const [authReason, setAuthReason] = useState(null);
   const [mode, setMode] = useState("signup");
-  const [form, setForm] = useState({ name: "", email: "", postcode: "", password: "" });
+  const [form, setForm] = useState({ name: "", email: "", postcode: "", password: "", confirm: "" });
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("Going soonest");
@@ -288,13 +293,28 @@ export default function Doorstep() {
 
   const fetchItems = useCallback(async (t) => {
     try {
-      const data = await api("/items", { token: t });
+      const data = await api("/items", { token: t || undefined });
       setItems(data.items);
     } catch (e) {
       if (e.status === 401) signOut("Your session expired — sign in again.");
       else setToast(e.message);
     }
   }, [signOut]);
+
+  /* Anything that needs an account routes through here: remember what they
+     were trying to do, ask them to sign in, then carry it out. */
+  const needsAccount = useCallback(
+    (reason, action) => {
+      if (token) return false;
+      setAuthReason(reason);
+      setPending(action ? { action } : null);
+      setMode("signup");
+      setErrors({});
+      setScreen("auth");
+      return true;
+    },
+    [token]
+  );
 
   /* restore session on load */
   useEffect(() => {
@@ -354,6 +374,7 @@ export default function Doorstep() {
 
   /* per-screen data */
   useEffect(() => {
+    if (screen === "home") api("/items/recent").then((d) => setRecent(d.items)).catch(() => {});
     if (!token) return;
     if (screen === "wishes") api("/wishes", { token }).then((d) => setWishes(d.wishes)).catch(() => {});
     if (screen === "mine") {
@@ -361,7 +382,6 @@ export default function Doorstep() {
       if (tab === "wishes") api("/wishes", { token }).then((d) => setWishes(d.wishes)).catch(() => {});
     }
     if (screen === "impact") api("/impact", { token }).then(setImpact).catch(() => {});
-    if (screen === "home") api("/items/recent", { token }).then((d) => setRecent(d.items)).catch(() => {});
     if (screen === "profile") api("/blocks", { token }).then((d) => setBlocked(d.blocked)).catch(() => {});
     if (screen === "give") {
       api("/autospec/status", { token }).then((d) => setAutospec((a) => ({ ...a, configured: d.configured }))).catch(() => {});
@@ -383,14 +403,14 @@ export default function Doorstep() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, token]);
 
-  /* load the feed while signed in, refresh it in the background */
-  const authed = ["home", "map", "detail", "give", "profile", "notifications", "wishes", "impact", "fallback", "mine"].includes(screen);
+  /* the feed refreshes for guests too */
+  const browsing = ["home", "map", "detail", "give", "profile", "notifications", "wishes", "impact", "fallback", "mine"].includes(screen);
   useEffect(() => {
-    if (!authed || !token) return;
+    if (!browsing) return;
     fetchItems(token);
     const t = setInterval(() => fetchItems(token), 45 * 1000);
     return () => clearInterval(t);
-  }, [authed, token, fetchItems]);
+  }, [browsing, token, fetchItems]);
 
   useEffect(() => {
     if (!toast) return;
@@ -473,6 +493,10 @@ export default function Doorstep() {
       next.postcode = "Enter a full UK postcode, like E8 3EP";
     if (!form.password) next.password = "Enter your password";
     else if (signup && form.password.length < 8) next.password = "Use at least 8 characters";
+    if (signup && !next.password) {
+      if (!form.confirm) next.confirm = "Type your password again";
+      else if (form.confirm !== form.password) next.confirm = "These don't match";
+    }
 
     setErrors(next);
     if (Object.keys(next).length > 0) return;
@@ -488,7 +512,26 @@ export default function Doorstep() {
       localStorage.setItem("ds_token", data.token);
       setToken(data.token);
       setUser(data.user);
-      setScreen("home");
+      setAuthReason(null);
+      await fetchItems(data.token);
+
+      /* pick up whatever they were doing before we interrupted */
+      const next = pending;
+      setPending(null);
+      if (next && next.action === "give") setScreen("give");
+      else if (next && next.action === "wishes") setScreen("wishes");
+      else if (next && next.action === "mine") setScreen("mine");
+      else if (next && next.action === "claim" && next.id) {
+        setScreen("home");
+        const fresh = await api(`/items/${next.id}/claim`, { method: "POST", token: data.token }).catch((err) => {
+          setToast(err.message);
+          return null;
+        });
+        if (fresh) {
+          setItems((list) => list.map((i) => (i.id === fresh.id ? fresh : i)));
+          setToast(`Claimed. ${whereLine(fresh)} Collect within 30 minutes.`);
+        }
+      } else setScreen("home");
     } catch (e) {
       setErrors(e.field ? { [e.field]: e.message } : { _form: e.message });
     } finally {
@@ -501,6 +544,7 @@ export default function Doorstep() {
   /* ---- claim / collect ---- */
 
   const claim = async (item) => {
+    if (needsAccount(`Sign in to claim ${item.title.toLowerCase()}`, { action: "claim", id: item.id })) return;
     try {
       const updated = await api(`/items/${item.id}/claim`, { method: "POST", token });
       setItems((list) => list.map((it) => (it.id === updated.id ? updated : it)));
@@ -569,6 +613,7 @@ export default function Doorstep() {
   };
 
   const toggleSave = async (item) => {
+    if (needsAccount("Sign in to save things for later")) return;
     const next = !item.saved;
     setItems((list) => list.map((i) => (i.id === item.id ? { ...i, saved: next } : i)));
     try {
@@ -927,12 +972,14 @@ export default function Doorstep() {
               </div>
 
               <h1 className="auth-lede">
-                {signup ? "Give it away before you bin it." : "Welcome back."}
+                {authReason ? authReason : signup ? "Give it away before you bin it." : "Welcome back."}
               </h1>
               <p className="auth-sub">
-                {signup
-                  ? "See what your neighbours are passing on right now, and pass on the things you're done with."
-                  : "Sign in to see what's going near you."}
+                {authReason
+                  ? "It takes a moment, and your postcode is only used to show what's within walking distance."
+                  : signup
+                    ? "See what your neighbours are passing on right now, and pass on the things you're done with."
+                    : "Sign in to see what's going near you."}
               </p>
 
               {signup && (
@@ -964,6 +1011,25 @@ export default function Doorstep() {
               </div>
 
               {signup && (
+                <div className={`field ${errors.confirm ? "bad" : ""}`}>
+                  <label htmlFor="ds-confirm">Confirm password</label>
+                  <input
+                    id="ds-confirm"
+                    type="password"
+                    value={form.confirm}
+                    onChange={set("confirm")}
+                    onKeyDown={onKey}
+                    placeholder="Type it again"
+                    autoComplete="new-password"
+                  />
+                  {errors.confirm && <p className="field-note">{errors.confirm}</p>}
+                  {!errors.confirm && form.confirm && form.confirm === form.password && form.password.length >= 8 && (
+                    <p className="field-ok">Passwords match</p>
+                  )}
+                </div>
+              )}
+
+              {!signup && (
                 <div className="rule-card">
                   <p className="rule-title">One rule, and it matters</p>
                   <p className="rule-body">
@@ -978,6 +1044,18 @@ export default function Doorstep() {
                 {busy ? "One moment…" : signup ? "Create account" : "Sign in"}
               </button>
               {errors._form && <p className="field-note form-note">{errors._form}</p>}
+
+              <button
+                className="browse-back"
+                onClick={() => {
+                  setAuthReason(null);
+                  setPending(null);
+                  setErrors({});
+                  setScreen("home");
+                }}
+              >
+                Keep looking around instead
+              </button>
 
               <p className="swap">
                 {signup ? "Already have an account? " : "New here? "}
@@ -1106,7 +1184,7 @@ export default function Doorstep() {
                 {item.note && <p className="detail-note">{item.note}</p>}
 
                 <div className="detail-meta">
-                  <span>{item.owner ? `Your doorstep · ${item.road}` : `${item.dist} · ${item.road}`}</span>
+                  <span>{item.owner ? `Your doorstep · ${item.road}` : [item.dist, item.road].filter(Boolean).join(" · ")}</span>
                   <span className="detail-spot">
                     {item.spot === "buzz and collect" ? "Giver will bring it down — buzz on arrival" : `Waiting spot: ${item.spot}`}
                   </span>
@@ -1968,27 +2046,55 @@ export default function Doorstep() {
                   <circle cx="12" cy="10" r="2.5" />
                 </svg>
               </button>
-              <button className="icon-btn" aria-label="Your things" onClick={() => { setTab("toCollect"); setScreen("mine"); }}>
+              <button
+                className="icon-btn"
+                aria-label="Your things"
+                onClick={() => {
+                  if (needsAccount("Sign in to see your things", { action: "mine" })) return;
+                  setTab("toCollect");
+                  setScreen("mine");
+                }}
+              >
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M5 8h14l-1.2 11.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z" />
                   <path d="M9 8V6a3 3 0 0 1 6 0v2" />
                 </svg>
               </button>
-              <button className="icon-btn bell" aria-label={unread > 0 ? `Alerts, ${unread} new` : "Alerts"} onClick={() => setScreen("notifications")}>
+              <button
+                className="icon-btn bell"
+                aria-label={unread > 0 ? `Alerts, ${unread} new` : "Alerts"}
+                onClick={() => {
+                  if (needsAccount("Sign in and we'll tell you when something you want appears", { action: "wishes" })) return;
+                  setScreen("notifications");
+                }}
+              >
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M18 9a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16S18 14 18 9z" />
                   <path d="M10.5 20a2 2 0 0 0 3 0" />
                 </svg>
                 {unread > 0 && <span className="bell-dot">{unread > 9 ? "9+" : unread}</span>}
               </button>
-              <button className="icon-btn" aria-label="Your profile" onClick={() => setScreen("profile")}>
+              <button
+                className="icon-btn"
+                aria-label="Your profile"
+                onClick={() => {
+                  if (needsAccount("Sign in to see your profile")) return;
+                  setScreen("profile");
+                }}
+              >
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <circle cx="12" cy="8" r="3.6" />
                   <path d="M5.5 20a6.5 6.5 0 0 1 13 0" />
                 </svg>
               </button>
-              <button className="place-btn" onClick={() => setScreen("profile")}>
-                {user ? user.postcode.toUpperCase() : ""}
+              <button
+                className="place-btn"
+                onClick={() => {
+                  if (needsAccount("Sign in to join your neighbourhood")) return;
+                  setScreen("profile");
+                }}
+              >
+                {user ? user.postcode.toUpperCase() : "Sign in"}
               </button>
             </div>
           </header>
@@ -2119,7 +2225,7 @@ export default function Doorstep() {
                       <p className="card-meta">
                         {item.note}
                         {item.note ? <br /> : null}
-                        {item.owner ? `Your doorstep · ${item.road}` : `${item.dist} · ${item.road}`}
+                        {item.owner ? `Your doorstep · ${item.road}` : [item.dist, item.road].filter(Boolean).join(" · ")}
                       </p>
                       <div className="meter-row">
                         <span className="meter-time" aria-label={`${formatLeft(remaining)} left`}>
@@ -2162,7 +2268,13 @@ export default function Doorstep() {
           </main>
 
           <div className="give-bar">
-            <button className="give-btn" onClick={() => setScreen("give")}>
+            <button
+              className="give-btn"
+              onClick={() => {
+                if (needsAccount("Sign in to give something away", { action: "give" })) return;
+                setScreen("give");
+              }}
+            >
               <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z" />
                 <circle cx="12" cy="13" r="3.5" />
