@@ -270,6 +270,10 @@ export default function Doorstep() {
   const [thanking, setThanking] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [savedOnly, setSavedOnly] = useState(false);
+  /* a grid of photographs reads far better than a column of rows, which is
+     what every marketplace app has settled on; the list stays for anyone who
+     prefers the detail */
+  const [view, setView] = useState(() => localStorage.getItem("ds_view") || "grid");
   const [demand, setDemand] = useState(0);
   const [stuff, setStuff] = useState(null);
   const [tab, setTab] = useState("toCollect");
@@ -823,6 +827,10 @@ export default function Doorstep() {
     }
   };
 
+  useEffect(() => {
+    localStorage.setItem("ds_view", view);
+  }, [view]);
+
   const setG = (key) => (e) => {
     setGive((g) => ({ ...g, [key]: e.target.value }));
     setGiveErrors((p) => (p[key] || p._form ? { ...p, [key]: null, _form: null } : p));
@@ -1198,24 +1206,64 @@ export default function Doorstep() {
                 <h1 className="detail-title">{item.title}</h1>
                 {item.note && <p className="detail-note">{item.note}</p>}
 
-                <div className="detail-meta">
-                  <span>{item.owner ? `Your doorstep · ${item.road}` : [item.dist, item.road].filter(Boolean).join(" · ")}</span>
-                  <span className="detail-spot">
-                    {item.spot === "buzz and collect" ? "Giver will bring it down — buzz on arrival" : `Waiting spot: ${item.spot}`}
+                <div className="facts">
+                  <span className="fact">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                      <path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z" />
+                      <circle cx="12" cy="10" r="2.4" />
+                    </svg>
+                    {item.owner ? "Your doorstep" : item.dist || item.road}
                   </span>
-                  {item.giver && !item.owner && (
-                    <span className="giver-badge">
-                      {item.giver.verified && (
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <path d="M20 6L9 17l-5-5" />
-                        </svg>
-                      )}
-                      {item.giver.name}
-                      {item.giver.verified ? ", address verified" : ""}
-                      {item.giver.handed > 0 ? ` · ${item.giver.handed} handed over` : ""}
-                    </span>
-                  )}
+                  <span className="fact">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                      <path d="M3 10.5 12 3l9 7.5" />
+                      <path d="M5.5 9.5V20h13V9.5" />
+                    </svg>
+                    {item.spot}
+                  </span>
+                  <span className="fact">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="8.5" />
+                      <path d="M12 7.5V12l3 1.8" />
+                    </svg>
+                    {Math.round(item.windowMs / 3600000)}h window
+                  </span>
+                  <span className="fact">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                      <rect x="4" y="4" width="16" height="16" rx="3" />
+                      <path d="M4 10h16" />
+                    </svg>
+                    {item.cat}
+                  </span>
                 </div>
+
+                <p className="detail-where">
+                  {item.spot === "buzz and collect"
+                    ? "The giver will bring it down — buzz when you arrive."
+                    : `It'll be waiting on the ${item.spot}, on ${item.road}.`}
+                </p>
+
+                {item.giver && !item.owner && (
+                  <div className="giver-card">
+                    <span className="giver-avatar">{item.giver.name.slice(0, 1).toUpperCase()}</span>
+                    <span className="giver-lines">
+                      <b>{item.giver.name}</b>
+                      <small>
+                        {item.giver.handed > 0
+                          ? `${item.giver.handed} thing${item.giver.handed === 1 ? "" : "s"} handed over`
+                          : "New to the neighbourhood"}
+                      </small>
+                      {item.giver.verified && (
+                        <em className="verified">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M20 6L9 17l-5-5" />
+                          </svg>
+                          Address verified
+                        </em>
+                      )}
+                    </span>
+                  </div>
+                )}
 
                 <div className="meter-row detail-meter">
                   <span className="meter-time">{formatLeft(item.expiresAt - now)}</span>
@@ -1260,6 +1308,46 @@ export default function Doorstep() {
                     ? "It's live from your own property — never the pavement."
                     : "It'll be on the giver's own property. Exact address appears when you claim."}
                 </p>
+
+                {(() => {
+                  const also = items
+                    .filter((i) => i.id !== item.id && i.expiresAt > now && i.status !== "taken" && !i.owner)
+                    .sort((a, b) => (a.cat === item.cat ? -1 : 1) - (b.cat === item.cat ? -1 : 1) || a.expiresAt - b.expiresAt)
+                    .slice(0, 4);
+                  if (!also.length) return null;
+                  return (
+                    <div className="also">
+                      <p className="sub-head">Also going near you</p>
+                      <div className="item-grid">
+                        {also.map((a) => (
+                          <article
+                            key={a.id}
+                            className="gcard"
+                            onClick={() => {
+                              setDetailId(a.id);
+                              setShot(0);
+                            }}
+                          >
+                            <div className="gcard-photo">
+                              {a.photo ? (
+                                <img src={a.photo} alt="" loading="lazy" />
+                              ) : (
+                                <span className="gcard-glyph">
+                                  <Glyph kind={a.kind} size={44} />
+                                </span>
+                              )}
+                              <span className="gcard-timer">{formatLeft(a.expiresAt - now)}</span>
+                            </div>
+                            <div className="gcard-copy">
+                              <b>{a.title}</b>
+                              <span>{[a.dist, a.road].filter(Boolean).join(" · ")}</span>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {!item.owner && (
                   <div className="detail-footer-actions">
@@ -2104,19 +2192,33 @@ export default function Doorstep() {
               )}
             </div>
 
-            <div className="scroll-strip">
-            <div className="chips" role="group" aria-label="Filter items">
-              {CATEGORIES.map((c) => (
+            <div className="cat-row" role="group" aria-label="Browse by category">
+              {[
+                { c: "Going soonest", kind: "clock", label: "All" },
+                { c: "Furniture", kind: "chairs", label: "Furniture" },
+                { c: "Kids", kind: "toys", label: "Kids" },
+                { c: "Garden", kind: "garden", label: "Garden" },
+                { c: "Electricals", kind: "bookcase", label: "Electricals" },
+              ].map((c) => (
                 <button
-                  key={c}
-                  className="chip"
-                  aria-pressed={filter === c}
-                  onClick={() => setFilter(c)}
+                  key={c.c}
+                  className="cat-btn"
+                  aria-pressed={filter === c.c}
+                  onClick={() => setFilter(c.c)}
                 >
-                  {c}
+                  <span className="cat-ring">
+                    {c.kind === "clock" ? (
+                      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#234A3B" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="8.5" />
+                        <path d="M12 7.5V12l3 1.8" />
+                      </svg>
+                    ) : (
+                      <Glyph kind={c.kind} size={30} />
+                    )}
+                  </span>
+                  {c.label}
                 </button>
               ))}
-            </div>
             </div>
 
             <div className="scroll-strip">
@@ -2131,6 +2233,22 @@ export default function Doorstep() {
                   </button>
                 ))}
               </div>
+              <div className="segment" role="group" aria-label="Layout">
+                <button aria-pressed={view === "grid"} aria-label="Grid view" onClick={() => setView("grid")}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" aria-hidden="true">
+                    <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" />
+                    <rect x="13.5" y="3.5" width="7" height="7" rx="1.5" />
+                    <rect x="3.5" y="13.5" width="7" height="7" rx="1.5" />
+                    <rect x="13.5" y="13.5" width="7" height="7" rx="1.5" />
+                  </svg>
+                </button>
+                <button aria-pressed={view === "list"} aria-label="List view" onClick={() => setView("list")}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" aria-hidden="true">
+                    <path d="M4 6.5h16M4 12h16M4 17.5h16" />
+                  </svg>
+                </button>
+              </div>
+
               <button className="saved-toggle" aria-pressed={savedOnly} onClick={() => setSavedOnly((v) => !v)}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill={savedOnly ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
                   <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z" />
@@ -2170,86 +2288,130 @@ export default function Doorstep() {
               </div>
             )}
 
-            {visible.map((item) => {
-              const remaining = item.expiresAt - now;
-              const urgent = remaining < 15 * 60 * 1000;
-              const pct = Math.max(0, Math.min(100, (remaining / item.windowMs) * 100));
-              const mine = item.status === "yours";
-              const gone = item.status === "taken";
+            <div className={view === "grid" ? "item-grid" : "item-list"}>
+              {visible.map((item) => {
+                const remaining = item.expiresAt - now;
+                const urgent = remaining < 15 * 60 * 1000;
+                const pct = Math.max(0, Math.min(100, (remaining / item.windowMs) * 100));
+                const mine = item.status === "yours";
+                const gone = item.status === "taken";
+                const open = () => {
+                  setDetailId(item.id);
+                  setShot(0);
+                  setScreen("detail");
+                };
 
-              return (
-                <article
-                  key={item.id}
-                  className={`card ${urgent && !gone ? "urgent" : ""} ${gone && !item.owner ? "taken" : ""}`}
-                  onClick={() => {
-                    setDetailId(item.id);
-                    setScreen("detail");
-                  }}
-                >
-                  <div className="card-body">
-                    <div className="thumb">
-                      {item.photo ? <img className="thumb-img" src={item.photo} alt="" /> : <Glyph kind={item.kind} />}
-                      {!item.owner && (
-                        <button
-                          className={`save-star ${item.saved ? "on" : ""}`}
-                          aria-label={item.saved ? `Remove ${item.title} from saved` : `Save ${item.title}`}
-                          aria-pressed={item.saved}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleSave(item);
-                          }}
-                        >
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill={item.saved ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
-                            <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z" />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-                    <div className="card-copy">
-                      <h2 className="card-title">{item.title}</h2>
-                      <p className="card-meta">
-                        {item.note}
-                        {item.note ? <br /> : null}
-                        {item.owner ? `Your doorstep · ${item.road}` : [item.dist, item.road].filter(Boolean).join(" · ")}
-                      </p>
-                      <div className="meter-row">
-                        <span className="meter-time" aria-label={`${formatLeft(remaining)} left`}>
-                          {formatLeft(remaining)}
-                        </span>
-                        <div className="meter-track">
-                          <div className="meter-fill" style={{ width: `${pct}%` }} />
+                if (view === "grid") {
+                  return (
+                    <article
+                      key={item.id}
+                      className={`gcard ${urgent && !gone ? "urgent" : ""} ${gone && !item.owner ? "taken" : ""}`}
+                      onClick={open}
+                    >
+                      <div className="gcard-photo">
+                        {item.photo ? (
+                          <img src={item.photo} alt="" loading="lazy" />
+                        ) : (
+                          <span className="gcard-glyph">
+                            <Glyph kind={item.kind} size={54} />
+                          </span>
+                        )}
+                        {!item.owner && (
+                          <button
+                            className={`save-star ${item.saved ? "on" : ""}`}
+                            aria-label={item.saved ? `Remove ${item.title} from saved` : `Save ${item.title}`}
+                            aria-pressed={item.saved}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSave(item);
+                            }}
+                          >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill={item.saved ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
+                              <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z" />
+                            </svg>
+                          </button>
+                        )}
+                        <span className={`gcard-timer ${urgent ? "urgent" : ""}`}>{formatLeft(remaining)}</span>
+                        {(gone || mine || item.owner) && (
+                          <span className="gcard-state">{mine ? "Yours" : item.owner ? "Your listing" : "Claimed"}</span>
+                        )}
+                      </div>
+                      <div className="gcard-copy">
+                        <b>{item.title}</b>
+                        <span>{item.owner ? "Your doorstep" : [item.dist, item.road].filter(Boolean).join(" · ")}</span>
+                      </div>
+                    </article>
+                  );
+                }
+
+                return (
+                  <article
+                    key={item.id}
+                    className={`card ${urgent && !gone ? "urgent" : ""} ${gone && !item.owner ? "taken" : ""}`}
+                    onClick={open}
+                  >
+                    <div className="card-body">
+                      <div className="thumb">
+                        {item.photo ? <img className="thumb-img" src={item.photo} alt="" loading="lazy" /> : <Glyph kind={item.kind} />}
+                        {!item.owner && (
+                          <button
+                            className={`save-star ${item.saved ? "on" : ""}`}
+                            aria-label={item.saved ? `Remove ${item.title} from saved` : `Save ${item.title}`}
+                            aria-pressed={item.saved}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSave(item);
+                            }}
+                          >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill={item.saved ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
+                              <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                      <div className="card-copy">
+                        <h2 className="card-title">{item.title}</h2>
+                        <p className="card-meta">
+                          {item.note}
+                          {item.note ? <br /> : null}
+                          {item.owner ? `Your doorstep · ${item.road}` : [item.dist, item.road].filter(Boolean).join(" · ")}
+                        </p>
+                        <div className="meter-row">
+                          <span className="meter-time" aria-label={`${formatLeft(remaining)} left`}>
+                            {formatLeft(remaining)}
+                          </span>
+                          <div className="meter-track">
+                            <div className="meter-fill" style={{ width: `${pct}%` }} />
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="card-action">
-                    <button
-                      className={`claim-btn ${mine ? "mine" : ""}`}
-                      disabled={(gone && !item.owner) || item.owner}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (mine) {
-                          setDetailId(item.id);
-                          setScreen("detail");
-                        } else {
-                          claim(item);
-                        }
-                      }}
-                    >
-                      {item.owner
-                        ? gone
-                          ? "Claimed — someone's collecting it"
-                          : "Your listing"
-                        : gone
-                          ? "Already claimed"
-                          : mine
-                            ? "Yours — tap for the address"
-                            : "Claim it"}
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
+                    <div className="card-action">
+                      <button
+                        className={`claim-btn ${mine ? "mine" : ""}`}
+                        disabled={(gone && !item.owner) || item.owner}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (mine) open();
+                          else claim(item);
+                        }}
+                      >
+                        {item.owner
+                          ? gone
+                            ? "Claimed — someone's collecting it"
+                            : "Your listing"
+                          : gone
+                            ? "Already claimed"
+                            : mine
+                              ? "Yours — tap for the address"
+                              : "Claim it"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
           </main>
 
           <nav className="tabbar" aria-label="Main">
