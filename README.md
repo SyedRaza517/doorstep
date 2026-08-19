@@ -1,0 +1,152 @@
+# Doorstep
+
+Neighbour-to-neighbour giveaway app, launching in London (London Fields first). Photograph something you're finished with, it gets listed for a short window, a neighbour claims it in one tap and collects it from your doorstep, porch, garden or lobby — never the pavement.
+
+Sign up, sign in, the home feed (search, distance sort, radius filter), a map view with approximate pins, item detail, the camera listing flow, and claim/collect mechanics — all backed by a real API and database with genuine London geography (postcodes.io).
+
+The London competitor analysis and launch strategy that shaped the current feature set lives in the "Doorstep in London" artifact (eight research streams: Olio, Freegle/Freecycle/Trash Nothing, Marketplace/Gumtree/Nextdoor, London reuse landscape, monetization, UK legal, launch playbooks, seed data).
+
+## Run it
+
+Two processes — the API and the web app:
+
+```bash
+npm install
+npm run server   # API + SQLite on http://localhost:4000
+npm run dev      # web app on http://localhost:5173 (proxies /api to 4000)
+```
+
+A demo account is seeded: `demo@doorstep.uk` / `doorstep123`. Eight listings across London Fields, Dalston and Stoke Newington are re-seeded with fresh windows every time the server starts, so the feed is never empty, plus a handful of already-collected items so the diversion figures aren't all zeros.
+
+## What's here
+
+```
+src/
+  App.jsx      all screens and state, talks to the API (feed, detail, map, give, auth)
+  styles.css   the full design system, incl. the desktop phone shell
+  reset.css    minimal normalisation
+  main.jsx     React root
+server/
+  index.js     Express API: auth, sessions, items, claims, strikes, alerts, SSE stream
+  db.js        SQLite schema (better-sqlite3), scrypt password hashing, London seed
+  geo.js       postcodes.io geocoding (cached), haversine distance, pin fuzzing
+  autospec.js  photo → structured listing draft via the Claude API (optional)
+  impact.js    diversion reporting: items, weight, CO2e, avoided cost by postcode
+```
+
+The database lives in `server/doorstep.db` (gitignored). Sessions are opaque bearer tokens stored server-side, so sign-out genuinely revokes them.
+
+## Tests
+
+```bash
+npm test
+```
+
+Seventeen tests, no mocks: the API suite boots the real server against a throwaway SQLite file and exercises the rules that matter — a claim race between two neighbours, addresses staying hidden from everyone but the claimer, map pins staying snapped to the grid, unsafe items being refused, saved searches firing only on genuine matches, and collected items moving from the feed into the diversion figures. The geo tests cover distance, formatting and pin blurring.
+
+## The API
+
+| Route | What it does |
+|---|---|
+| `POST /api/auth/signup` | name, email, postcode, password → token. Postcode is geocoded via postcodes.io — well-formed but non-existent postcodes are rejected. |
+| `POST /api/auth/signin` | email, password → token |
+| `POST /api/auth/signout` | revokes the session |
+| `GET /api/me` | the signed-in user |
+| `GET /api/items` | live items with real distances from the signed-in user and ~110m-fuzzed map pins. The full address (and exact pin) only appears on items you listed or claimed. Lapsed 30-minute holds are swept here — the item returns to the feed and the claimer gets a no-show strike. |
+| `POST /api/items` | list an item (title, note, cat, kind, road, address, spot, optional windowMinutes, optional photo as a data URL — the app downscales camera shots to ~900px JPEG). Car seats, cot mattresses and age-restricted goods are refused. Item coordinates come from the giver's postcode. |
+| `POST /api/items/:id/claim` | 30-minute hold; returns the address and collection spot. 409 if someone got there first, 410 if the window closed, 403 after three no-show strikes in 30 days. |
+| `POST /api/items/:id/collected` | claimer confirms the pickup — closes the loop and protects them from a strike. |
+| `GET /api/items/:id/fallback` | for your own listing: charity and council options if nobody takes it |
+| `GET /api/stream?token=…` | Server-Sent Events. New listings matching a saved search arrive here instantly. |
+| `GET/POST/DELETE /api/alerts` | saved searches — keyword, category, radius (max 10 per person) |
+| `GET /api/notifications`, `POST /api/notifications/read` | alert history and marking it read |
+| `POST /api/autospec` | photo (data URL) → drafted title, note, category, size, hazards. `GET /api/autospec/status` reports whether it's switched on. |
+| `GET /api/impact` | your diversion figures and the neighbourhood's, split by postcode district |
+
+### Photo auto-spec
+
+Listing from a photo calls the Claude API (`claude-opus-5`, structured output) to draft the title, note, category and estimated size — the giver confirms instead of typing. The estimated size sets the window: 2 hours to carry, 3 for two-person, 4 for a van job. It also flags hazards (fire labels, untested electricals) and refuses items that can't be passed on second-hand.
+
+It's optional. Set `ANTHROPIC_API_KEY` before `npm run server` to switch it on; without a key the app quietly falls back to the manual form.
+
+### Alerts
+
+A saved search is keyword + category + radius. When a listing matches, the server writes a notification and pushes it down the SSE stream — the bell in the header updates without a refresh. This is deliberately free: Olio charges £2.99/month for alerts that are fast enough to win an item, and slow alerts are the most-cited complaint about every competitor.
+
+A lapsed 30-minute hold releases the item back to the feed automatically — no cron needed, status is computed on read.
+
+## Try
+
+- Submit the signup form empty, or type an invalid postcode — validation is real, on both client and server
+- Sign up with an email twice — the server refuses the second account
+- Claim something. It holds for you for 30 minutes and the card swaps the road name for the full address
+- Open a second browser (or the Android app) as another user — the item shows "Already claimed" and no address
+- List something yourself: "Give something away" opens the camera (on a phone; a file picker on desktop), you fill in the details, pick a 2- or 4-hour window, and confirm the not-on-the-pavement rule before it goes live
+- Save a search ("lamp", within a mile), then list a matching item from another account in a second browser — the alert lands in the first window instantly, no refresh
+- Open one of your own listings and tap "What if nobody takes it?" — charity collection first, council booking last
+- Tap the person icon or the postcode chip to open your profile — given/collected counts, your no-show standing, saved searches, your diversion figures, and Sign out (the token is revoked server-side)
+
+## The one rule
+
+Items must be left on the user's own property — doorstep, front garden, porch or building lobby — never on the pavement.
+
+This is not a style preference. Under the Environmental Protection Act 1990, leaving items on public land is fly-tipping, and fixed penalty notices now run up to £1,000 — 17+ London boroughs charge the maximum, and ~50,000 FPNs were issued in London in 2024/25 alone. A resident in Bournemouth was fined for furniture left outside her house with a note inviting people to take it; her appeal was rejected. Because 54% of London households are flats, the app offers collection spots that all stay on private property: doorstep, front garden, porch, building lobby, or "buzz and I'll bring it down".
+
+The whole product depends on never encouraging that behaviour. It's stated on the signup screen for that reason, and it should stay prominent wherever an item is listed.
+
+## Design notes
+
+**Palette** comes from British street furniture rather than generic eco-green: bottle green (`#234A3B`) like Victorian park railings, pale weathered render (`#E5E7DF`) as the ground, hi-vis signal yellow (`#F5C518`) reserved for the countdown and nothing else.
+
+**Type** is Bricolage Grotesque for display, Instrument Sans for body, DM Mono for the countdown. The mono timer is deliberate — it should read like a parking meter.
+
+**The feed sorts by time remaining, not distance.** This is the opposite of every marketplace and it's correct here: an item 0.2 miles away with four minutes left is less useful than one half a mile away with ninety.
+
+**Claiming has no messaging.** One tap, a 30-minute hold, address released. The most common complaint about Facebook Marketplace and Gumtree giveaways is no-shows and endless back-and-forth. Resisting the urge to add chat is the differentiator — don't let this grow into a messaging feature.
+
+## Not built yet
+
+1. **Native push.** Alerts are instant in-app over SSE, but a closed app stays quiet. Production push needs `@capacitor/push-notifications` with Firebase (Android) and APNs (iOS, needs an Apple Developer account). Until then the app must be open to hear an alert.
+2. **Verified weight and CO2 factors.** `server/impact.js` uses placeholder constants — only the avoided-cost figure is grounded (Hackney's £15 per five bulky items). Replace them with WRAP's published reuse weights and CO2e factors before any figure is shown to a council or the public. The file says so in a comment; keep it that way until it's true.
+3. **Charity booking as a real integration.** The fallback screen links out to BHF, Emmaus and Traid booking pages. Booking inside the app, with the collection tracked against the listing, is what makes the council reporting complete.
+4. **Address verification.** Nextdoor's residency check is why its giveaways feel safe. Today "verified" only means the postcode geocoded — a postcard code or bank check would make the badge mean what people will read into it.
+5. **Photo storage.** Photos are base64 in SQLite, which is fine for a prototype and wrong for scale. Move to object storage with signed URLs.
+
+## Known issues
+
+- **The 30-minute hold is swept lazily**, on read. If nobody opens the app, a lapsed claim isn't recorded until someone does. Fine at this size; needs a timer or a cron job when volume grows.
+- **The seed re-runs on every server start**, wiping and re-listing the eight demo items. Real listings from other accounts survive, but don't build anything that assumes seed IDs are stable.
+
+## Before launch
+
+Take advice on the waste-carrier question. If someone regularly collects items to resell they may need a waste carrier registration, and a household that hands waste to an unregistered carrier can be liable. Keep the framing as goods being given between neighbours, not waste being disposed of — that distinction is legally load-bearing.
+
+## Mobile apps (Capacitor)
+
+The same codebase ships as native Android and iOS apps via [Capacitor](https://capacitorjs.com). The web build in `dist/` is wrapped in a native shell; the `android/` and `ios/` folders are the native projects and are committed as source.
+
+After any change to the web app, rebuild and copy the assets into both platforms:
+
+```bash
+npm run build; npx cap sync
+```
+
+To build and run the Android app, open the project in Android Studio:
+
+```bash
+npx cap open android
+```
+
+The `ios/` project can only be built on a Mac (or macOS CI) with Xcode installed:
+
+```bash
+npx cap open ios
+```
+
+The native apps can't reach `localhost`, so point them at the machine running the API before building — the server already listens on all interfaces:
+
+```bash
+VITE_API_URL=http://<your-pc-lan-ip>:4000/api npm run build; npx cap sync
+```
+
+(PowerShell: `$env:VITE_API_URL = "http://<your-pc-lan-ip>:4000/api"; npm run build; npx cap sync`.) The phone must be on the same network, and Windows Firewall must allow inbound connections to Node on port 4000.

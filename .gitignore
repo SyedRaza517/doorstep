@@ -1,0 +1,29 @@
+node_modules
+dist
+.DS_Store
+*.local
+.env
+server/doorstep.db*
+
+# Capacitor / native build output
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/app/src/main/assets/public/
+android/app/src/main/res/raw/
+ios/App/build/
+ios/App/Pods/
+ios/App/App/public/
+ios/DerivedData/
+*.apk
+*.aab
+
+# editors / OS
+.idea/
+*.iml
+.vscode/
+Thumbs.db
+
+# scratch
+screenshots/debug*.png
