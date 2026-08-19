@@ -1,4 +1,4 @@
-package com.doorstep.app;
+package uk.co.doorstep.app;
 
 import com.getcapacitor.BridgeActivity;
 

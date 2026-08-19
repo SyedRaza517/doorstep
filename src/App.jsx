@@ -309,6 +309,17 @@ const milesLabel = (r) => {
   return `${r} miles`;
 };
 
+/* "216h ago" is not something anyone says out loud */
+const agoLabel = (mins) => {
+  if (mins < 60) return `${mins} min ago`;
+  if (mins < 24 * 60) {
+    const h = Math.round(mins / 60);
+    return h === 1 ? "an hour ago" : `${h} hours ago`;
+  }
+  const d = Math.round(mins / (24 * 60));
+  return d === 1 ? "yesterday" : `${d} days ago`;
+};
+
 const addedOn = (ms) => {
   if (!ms) return "";
   const days = Math.floor((Date.now() - ms) / 86400000);
@@ -436,6 +447,7 @@ export default function Doorstep() {
   const [impact, setImpact] = useState(null);
   const [fallback, setFallback] = useState(null);
   const [recent, setRecent] = useState([]);
+  const goneStrip = useRef(null);
   const [reporting, setReporting] = useState(null);
   const [editing, setEditing] = useState(null);
   const [shot, setShot] = useState(0);
@@ -1208,6 +1220,45 @@ export default function Doorstep() {
       )}
     </>
   );
+
+  /* "Just gone" moves by itself. It is the proof the neighbourhood is alive,
+     and nobody swipes a strip they haven't noticed. It steps one card at a
+     time, loops back to the start, and stops the moment someone touches it or
+     the screen is hidden — and never runs at all for anyone who has asked for
+     less motion. */
+  useEffect(() => {
+    const strip = goneStrip.current;
+    if (screen !== "home" || !strip || recent.length < 2) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    let paused = false;
+    const hold = () => (paused = true);
+    const release = () => (paused = false);
+
+    strip.addEventListener("pointerdown", hold);
+    strip.addEventListener("pointerenter", hold);
+    strip.addEventListener("pointerleave", release);
+    strip.addEventListener("touchstart", hold, { passive: true });
+    strip.addEventListener("touchend", release, { passive: true });
+
+    const tick = setInterval(() => {
+      if (paused || document.hidden) return;
+      const card = strip.firstElementChild;
+      if (!card) return;
+      const step = card.getBoundingClientRect().width + 10;
+      const end = strip.scrollWidth - strip.clientWidth - 4;
+      strip.scrollTo({ left: strip.scrollLeft >= end ? 0 : strip.scrollLeft + step, behavior: "smooth" });
+    }, 2600);
+
+    return () => {
+      clearInterval(tick);
+      strip.removeEventListener("pointerdown", hold);
+      strip.removeEventListener("pointerenter", hold);
+      strip.removeEventListener("pointerleave", release);
+      strip.removeEventListener("touchstart", hold);
+      strip.removeEventListener("touchend", release);
+    };
+  }, [screen, recent.length]);
 
   const addWish = async () => {
     try {
@@ -3030,7 +3081,7 @@ export default function Doorstep() {
             {recent.length > 0 && !q.trim() && (
               <div className="just-gone">
                 <p className="sub-head">Just gone</p>
-                <div className="gone-strip">
+                <div className="gone-strip" ref={goneStrip}>
                   {recent.map((r, i) => (
                     <span key={i} className="gone-chip">
                       <span className="gone-pic">
@@ -3041,7 +3092,7 @@ export default function Doorstep() {
                         )}
                       </span>
                       <b>{r.title}</b>
-                      <small>{r.agoMinutes < 60 ? `${r.agoMinutes} min ago` : `${Math.round(r.agoMinutes / 60)}h ago`}</small>
+                      <small>{agoLabel(r.agoMinutes)}</small>
                     </span>
                   ))}
                 </div>

@@ -750,7 +750,7 @@ app.get(
     const rows = await query(
       `SELECT title, cat, kind, road, collected_at, photo_ref FROM items
        WHERE collected_at IS NOT NULL AND hidden_at IS NULL
-       ORDER BY collected_at DESC LIMIT 8`
+       ORDER BY collected_at DESC LIMIT 12`
     );
     res.json({
       items: rows.map((r) => ({

@@ -354,12 +354,31 @@ const SEED_ITEMS = [
    Dated over the past three weeks and already expired, so they never appear
    in the feed — only in the impact report. */
 const SEED_HISTORY = [
-  { title: "Chest of drawers", cat: "Furniture", kind: "bookcase", road: "Ellingfort Road, E8", postcode: "E8 3PA", daysAgo: 19 },
-  { title: "Highchair", cat: "Kids", kind: "baby", road: "Navarino Road, E8", postcode: "E8 1AD", daysAgo: 16 },
-  { title: "Garden bench", cat: "Garden", kind: "garden", road: "Gayhurst Road, E8", postcode: "E8 3EN", daysAgo: 12 },
-  { title: "Desk lamp", cat: "Electricals", kind: "bookcase", road: "Sandringham Road, E8", postcode: "E8 2LR", daysAgo: 9 },
-  { title: "Bookshelf", cat: "Furniture", kind: "bookcase", road: "Parkholme Road, E8", postcode: "E8 3AG", daysAgo: 5 },
-  { title: "Scooter", cat: "Kids", kind: "bike", road: "Barbauld Road, N16", postcode: "N16 0SS", daysAgo: 2 },
+  { title: "Chest of drawers", cat: "Furniture", kind: "bookcase", pic: "chest-of-drawers", road: "Ellingfort Road, E8", postcode: "E8 3PA", daysAgo: 19 },
+  { title: "Highchair", cat: "Kids", kind: "baby", pic: "high-chair", road: "Navarino Road, E8", postcode: "E8 1AD", daysAgo: 16 },
+  { title: "Garden bench", cat: "Garden", kind: "garden", pic: "garden-chair", road: "Gayhurst Road, E8", postcode: "E8 3EN", daysAgo: 12 },
+  { title: "Desk lamp", cat: "Electricals", kind: "bookcase", pic: "desk-lamp", road: "Sandringham Road, E8", postcode: "E8 2LR", daysAgo: 9 },
+  { title: "Bookshelf", cat: "Furniture", kind: "bookcase", pic: "shelf-unit", road: "Parkholme Road, E8", postcode: "E8 3AG", daysAgo: 5 },
+  { title: "Scooter", cat: "Kids", kind: "bike", pic: "balance-bike", road: "Barbauld Road, N16", postcode: "N16 0SS", daysAgo: 2 },
+];
+
+/* "Just gone" only means something if it really did just go. These were
+   collected by other neighbours in the last day or so, so the strip on the
+   home screen shows the neighbourhood actually working rather than a
+   fortnight of stale history. */
+const SEED_JUST_GONE = [
+  { title: "Ercol dining chairs x2", cat: "Furniture", kind: "chairs", pic: "dining-chair", road: "Wilton Way, E8", postcode: "E8 3PZ", minutesAgo: 14 },
+  { title: "Sourdough, still warm", cat: "Bakery", kind: "bread", pic: "bread", road: "Broadway Market, E8", postcode: "E8 4QJ", minutesAgo: 31, type: "food" },
+  { title: "Monstera, big one", cat: "Garden", kind: "garden", pic: "houseplant", road: "Lansdowne Drive, E8", postcode: "E8 3EP", minutesAgo: 52 },
+  { title: "Toddler stair gate", cat: "Kids", kind: "baby", pic: "stair-gate", road: "Greenwood Road, E8", postcode: "E8 1AB", minutesAgo: 78 },
+  { title: "Dualit toaster", cat: "Electricals", kind: "bookcase", pic: "toaster", road: "Mare Street, E8", postcode: "E8 3RH", minutesAgo: 104 },
+  { title: "Box of board games", cat: "Kids", kind: "toys", pic: "board-games", road: "Richmond Road, E8", postcode: "E8 3AS", minutesAgo: 142 },
+  { title: "Veg box, half unused", cat: "Fruit & veg", kind: "veg", pic: "vegetables", road: "Middleton Road, E8", postcode: "E8 4LN", minutesAgo: 189, type: "food" },
+  { title: "Pine desk", cat: "Furniture", kind: "bookcase", pic: "desk", road: "Dalston Lane, E8", postcode: "E8 3AH", minutesAgo: 236 },
+  { title: "Watering can and trays", cat: "Garden", kind: "garden", pic: "watering-can", road: "Forest Road, E8", postcode: "E8 3BH", minutesAgo: 305 },
+  { title: "Two floor cushions", cat: "Furniture", kind: "chairs", pic: "stool", road: "Albion Drive, E8", postcode: "E8 4ET", minutesAgo: 402 },
+  { title: "Kids books, a whole bag", cat: "Kids", kind: "toys", pic: "kids-books", road: "Queensbridge Road, E8", postcode: "E8 3ND", minutesAgo: 520 },
+  { title: "Anglepoise lamp", cat: "Electricals", kind: "bookcase", pic: "floor-lamp", road: "Shrubland Road, E8", postcode: "E8 4NN", minutesAgo: 640 },
 ];
 
 /* Food moves faster and lives shorter, so the demo reflects that: short
@@ -559,8 +578,8 @@ export async function refreshSeed() {
     const at = now - h.daysAgo * 24 * 60 * 60 * 1000;
     const coords = await one("SELECT lat, lng FROM postcode_cache WHERE postcode = $1", [h.postcode.replace(/\s+/g, "")]);
     const hist = await one(
-      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, postcode, lat, lng, spot, claimed_by, claim_expires_at, collected_at)
-       VALUES ($1,$2,'',$3,$4,$5,$6,'',$7,$8,$9,$10,$11,$12,'doorstep',$13,$14,$15) RETURNING id`,
+      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, postcode, lat, lng, spot, claimed_by, claim_expires_at, collected_at, photo_ref)
+       VALUES ($1,$2,'',$3,$4,$5,$6,'',$7,$8,$9,$10,$11,$12,'doorstep',$13,$14,$15,$16) RETURNING id`,
       [
         giverIds[i % giverIds.length],
         h.title,
@@ -577,9 +596,41 @@ export async function refreshSeed() {
         demoId,
         at,
         at,
+        h.pic || null,
       ]
     );
     history[h.title] = Number(hist.id);
+  }
+
+  /* things that went in the last few hours, collected by neighbours rather
+     than the demo account, so "Just gone" has something true to show */
+  for (const [i, g] of SEED_JUST_GONE.entries()) {
+    const at = now - g.minutesAgo * 60 * 1000;
+    const coords = await geocodeSeed(g.postcode);
+    const taker = giverIds[(i + 1) % giverIds.length];
+    await query(
+      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, postcode, lat, lng, spot, claimed_by, claim_expires_at, collected_at, photo_ref, type)
+       VALUES ($1,$2,'',$3,$4,$5,$6,'',$7,$8,$9,$10,$11,$12,'doorstep',$13,$14,$15,$16,$17)`,
+      [
+        giverIds[i % giverIds.length],
+        g.title,
+        g.cat,
+        g.kind,
+        g.road,
+        `${20 + i} ${g.road.replace(/,.*$/, "")}`,
+        2 * 60 * 60 * 1000,
+        at,
+        at - 2 * 60 * 60 * 1000,
+        g.postcode,
+        coords.lat,
+        coords.lng,
+        taker,
+        at,
+        at,
+        g.pic,
+        g.type || "nonfood",
+      ]
+    );
   }
 
   await seedActivity({ now, demoId, giverIds, listed, history });
