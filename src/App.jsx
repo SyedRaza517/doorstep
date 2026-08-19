@@ -280,14 +280,23 @@ export default function Doorstep() {
 
   useClock();
 
+  /* Signing out drops you back to the feed as a guest. There is nothing to
+     log in to see, so a sign-up form here would be a dead end. */
   const signOut = useCallback((message) => {
     const t = localStorage.getItem("ds_token");
     if (t) api("/auth/signout", { method: "POST", token: t }).catch(() => {});
     localStorage.removeItem("ds_token");
     setToken(null);
     setUser(null);
-    setItems([]);
-    setScreen("auth");
+    setNotes([]);
+    setUnread(0);
+    setWishes([]);
+    setStuff(null);
+    setBlocked([]);
+    setSavedOnly(false);
+    setPending(null);
+    setAuthReason(null);
+    setScreen("home");
     if (message) setToast(message);
   }, []);
 
@@ -296,7 +305,7 @@ export default function Doorstep() {
       const data = await api("/items", { token: t || undefined });
       setItems(data.items);
     } catch (e) {
-      if (e.status === 401) signOut("Your session expired — sign in again.");
+      if (e.status === 401) signOut("Your session expired — you're browsing as a guest.");
       else setToast(e.message);
     }
   }, [signOut]);
@@ -325,7 +334,13 @@ export default function Doorstep() {
         setStats(data.stats);
         setScreen("home");
       })
-      .catch(() => signOut());
+      .catch(() => {
+        /* an expired token is not worth a message — just carry on as a guest */
+        localStorage.removeItem("ds_token");
+        setToken(null);
+        setUser(null);
+        setScreen("home");
+      });
   }, [token, user, signOut]);
 
   /* fresh stats every time the profile opens */
@@ -656,7 +671,7 @@ export default function Doorstep() {
       setUser(null);
       setItems([]);
       setConfirmDelete(false);
-      setScreen("auth");
+      setScreen("home");
       setToast("Account erased. Anything already collected stays counted, without your name on it.");
     } catch (e) {
       setToast(e.message);
