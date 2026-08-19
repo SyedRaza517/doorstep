@@ -231,20 +231,22 @@ const SubScreen = ({ title, time, toast, sheets, onBack, children }) => (
 );
 
 const CATEGORIES = ["Going soonest", "Furniture", "Kids", "Garden", "Electricals"];
+/* `kind` is the drawn glyph used when a listing has no picture; `pic` is the
+   illustration that stands for the whole category in the shortcut row. */
 const NONFOOD_CATS = [
-  { cat: "Furniture", kind: "chairs" },
-  { cat: "Kids", kind: "toys" },
-  { cat: "Garden", kind: "garden" },
-  { cat: "Electricals", kind: "bookcase" },
+  { cat: "Furniture", kind: "chairs", pic: "armchair" },
+  { cat: "Kids", kind: "toys", pic: "toy-kitchen" },
+  { cat: "Garden", kind: "garden", pic: "houseplant" },
+  { cat: "Electricals", kind: "bookcase", pic: "floor-lamp" },
 ];
 
 const FOOD_CATS = [
-  { cat: "Bakery", kind: "bread" },
-  { cat: "Fruit & veg", kind: "veg" },
-  { cat: "Dairy", kind: "dairy" },
-  { cat: "Store cupboard", kind: "tin" },
-  { cat: "Ready meals", kind: "meal" },
-  { cat: "Drinks", kind: "drink" },
+  { cat: "Bakery", kind: "bread", pic: "bread" },
+  { cat: "Fruit & veg", kind: "veg", pic: "vegetables" },
+  { cat: "Dairy", kind: "dairy", pic: "dairy" },
+  { cat: "Store cupboard", kind: "tin", pic: "tins" },
+  { cat: "Ready meals", kind: "meal", pic: "ready-meal" },
+  { cat: "Drinks", kind: "drink", pic: "drinks" },
 ];
 
 const catsFor = (type) => (type === "food" ? FOOD_CATS : NONFOOD_CATS);
@@ -2414,19 +2416,6 @@ export default function Doorstep() {
             </div>
             <div className="topbar-actions">
               <button
-                className="give-top"
-                onClick={() => {
-                  if (needsAccount("Sign in to give something away", { action: "give" })) return;
-                  setScreen("give");
-                }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z" />
-                  <circle cx="12" cy="13" r="3.4" />
-                </svg>
-                Give
-              </button>
-              <button
                 className="place-btn"
                 onClick={() => {
                   if (needsAccount("Sign in to join your neighbourhood")) return;
@@ -2487,10 +2476,10 @@ export default function Doorstep() {
 
             <div className="cat-row" role="group" aria-label="Browse by category">
               {[
-                { c: "Going soonest", kind: "clock", label: "All" },
+                { c: "Going soonest", pic: null, label: "All" },
                 ...(typeFilter === "food" ? FOOD_CATS : typeFilter === "nonfood" ? NONFOOD_CATS : [...NONFOOD_CATS, ...FOOD_CATS])
                   .slice(0, typeFilter === "all" ? 4 : 6)
-                  .map((c) => ({ c: c.cat, kind: c.kind, label: c.cat })),
+                  .map((c) => ({ c: c.cat, pic: c.pic, label: c.cat })),
               ].map((c) => (
                 <button
                   key={c.c}
@@ -2499,13 +2488,13 @@ export default function Doorstep() {
                   onClick={() => setFilter(c.c)}
                 >
                   <span className="cat-ring">
-                    {c.kind === "clock" ? (
-                      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#234A3B" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
+                    {c.pic ? (
+                      <img src={`${API}/photos/${c.pic}`} alt="" loading="lazy" />
+                    ) : (
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
                         <circle cx="12" cy="12" r="8.5" />
                         <path d="M12 7.5V12l3 1.8" />
                       </svg>
-                    ) : (
-                      <Glyph kind={c.kind} size={30} />
                     )}
                   </span>
                   {c.label}
@@ -2595,7 +2584,13 @@ export default function Doorstep() {
                 <div className="gone-strip">
                   {recent.slice(0, 3).map((r, i) => (
                     <span key={i} className="gone-chip">
-                      <Glyph kind={r.kind} size={26} />
+                      <span className="gone-pic">
+                        {r.photoRef ? (
+                          <img src={`${API}/photos/${r.photoRef}`} alt="" loading="lazy" />
+                        ) : (
+                          <Glyph kind={r.kind} size={24} />
+                        )}
+                      </span>
                       <b>{r.title}</b>
                       <small>{r.agoMinutes < 60 ? `${r.agoMinutes} min ago` : `${Math.round(r.agoMinutes / 60)}h ago`}</small>
                     </span>
@@ -2773,20 +2768,25 @@ export default function Doorstep() {
               </svg>
               Map
             </button>
+
+            {/* the one thing the app wants you to do, sat under the thumb */}
             <button
-              className="tabbar-btn"
+              className="tabbar-give"
+              aria-label="Give something away"
               onClick={() => {
-                if (needsAccount("Sign in to see your things", { action: "mine" })) return;
-                setTab("toCollect");
-                setScreen("mine");
+                if (needsAccount("Sign in to give something away", { action: "give" })) return;
+                setScreen("give");
               }}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M5 8h14l-1.2 11.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z" />
-                <path d="M9 8V6a3 3 0 0 1 6 0v2" />
-              </svg>
-              Yours
+              <span className="give-ring">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z" />
+                  <circle cx="12" cy="13" r="3.4" />
+                </svg>
+              </span>
+              Give
             </button>
+
             <button
               className="tabbar-btn"
               onClick={() => {

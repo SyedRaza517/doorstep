@@ -610,7 +610,7 @@ app.get(
   wrap(async (req, res) => {
     const now = Date.now();
     const rows = await query(
-      `SELECT title, cat, kind, road, collected_at FROM items
+      `SELECT title, cat, kind, road, collected_at, photo_ref FROM items
        WHERE collected_at IS NOT NULL AND hidden_at IS NULL
        ORDER BY collected_at DESC LIMIT 8`
     );
@@ -620,6 +620,7 @@ app.get(
         cat: r.cat,
         kind: r.kind,
         road: r.road,
+        photoRef: r.photo_ref || null,
         agoMinutes: Math.max(1, Math.round((now - num(r.collected_at)) / 60000)),
       })),
     });
