@@ -334,6 +334,9 @@ export default function Doorstep() {
   const [sort, setSort] = useState("time");
   const [radius, setRadius] = useState(2);
   const [items, setItems] = useState([]);
+  /* how the current page relates to the whole result: total, whether there is
+     more to fetch, and whether a fetch is in flight */
+  const [feed, setFeed] = useState({ total: 0, more: false, loading: true });
   const [toast, setToast] = useState(null);
   const [give, setGive] = useState(EMPTY_GIVE);
   const [giveErrors, setGiveErrors] = useState({});
@@ -349,6 +352,7 @@ export default function Doorstep() {
   const [reporting, setReporting] = useState(null);
   const [editing, setEditing] = useState(null);
   const [shot, setShot] = useState(0);
+  const [peek, setPeek] = useState(null);
   const [blocked, setBlocked] = useState([]);
   const [thanking, setThanking] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -581,31 +585,37 @@ export default function Doorstep() {
     const layer = L.layerGroup().addTo(m);
     const nowMs = Date.now();
     const live = items.filter((it) => it.expiresAt > nowMs && it.lat != null && it.status !== "taken");
+
     for (const it of live) {
       const urgent = it.expiresAt - nowMs < 15 * 60 * 1000;
+      const mine = it.owner || it.status === "yours";
+      const food = it.type === "food";
+      /* the photograph is the pin: far easier to read at a glance than a dot */
+      const inner = it.photo
+        ? `<img src="${esc(it.photo)}" alt="" />`
+        : `<span class="pin-letter">${esc(it.title.slice(0, 1).toUpperCase())}</span>`;
       const icon = L.divIcon({
         className: "",
-        html: `<div class="pin-dot${urgent ? " urgent" : ""}${it.owner || it.status === "yours" ? " mine" : ""}"></div>`,
-        iconSize: [18, 18],
-        iconAnchor: [9, 9],
+        html: `<div class="pin${urgent ? " urgent" : ""}${mine ? " mine" : ""}${food ? " food" : ""}">${inner}<i></i></div>`,
+        iconSize: [46, 54],
+        iconAnchor: [23, 52],
       });
-      const marker = L.marker([it.lat, it.lng], { icon }).addTo(layer);
-      const el = document.createElement("div");
-      el.className = "pin-pop";
-      el.innerHTML = `<strong>${esc(it.title)}</strong><span>${esc(it.dist)} · ${formatLeft(it.expiresAt - nowMs)} left</span>`;
-      const btn = document.createElement("button");
-      btn.textContent = it.status === "yours" ? "Yours — details" : "View";
-      btn.onclick = () => {
-        setDetailId(it.id);
-        setScreen("detail");
-      };
-      el.appendChild(btn);
-      marker.bindPopup(el, { closeButton: false });
+      L.marker([it.lat, it.lng], { icon, riseOnHover: true })
+        .addTo(layer)
+        .on("click", () => setPeek(it.id));
     }
+
+    /* fit the view to what is actually out there */
+    if (live.length) {
+      const pts = live.map((i) => [i.lat, i.lng]);
+      if (user && user.lat != null) pts.push([user.lat, user.lng]);
+      m.fitBounds(L.latLngBounds(pts).pad(0.18), { animate: false, maxZoom: 16 });
+    }
+
     return () => {
       layer.remove();
     };
-  }, [screen, items]);
+  }, [screen, items, user]);
 
   /* ---- auth handlers ---- */
 
@@ -2047,7 +2057,13 @@ export default function Doorstep() {
           <StatusBar time={timeNow} />
           <div className="ds-frame map-frame">
             <header className="topbar">
-              <button className="back-btn" onClick={() => setScreen("home")}>
+              <button
+                className="back-btn"
+                onClick={() => {
+                  setPeek(null);
+                  setScreen("home");
+                }}
+              >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M15 18l-6-6 6-6" />
                 </svg>
@@ -2058,7 +2074,42 @@ export default function Doorstep() {
             </header>
             <div className="map-wrap">
               <div ref={mapRef} className="map-canvas" />
-              <p className="map-note">Pins are approximate until you claim — then the exact address is yours.</p>
+
+              {(() => {
+                const it = items.find((i) => i.id === peek);
+                if (!it) return <p className="map-note">Pins are approximate until you claim — then the exact address is yours.</p>;
+                const left = it.expiresAt - now;
+                return (
+                  <div className="peek" role="dialog" aria-label={it.title}>
+                    <button className="peek-close" aria-label="Close" onClick={() => setPeek(null)}>
+                      ×
+                    </button>
+                    <div
+                      className="peek-body"
+                      onClick={() => {
+                        setDetailId(it.id);
+                        setShot(0);
+                        setScreen("detail");
+                      }}
+                    >
+                      <div className="peek-photo">
+                        {it.photo ? <img src={it.photo} alt="" /> : <Glyph kind={it.kind} size={38} />}
+                      </div>
+                      <div className="peek-copy">
+                        <b>{it.title}</b>
+                        <span>{[it.dist, it.road].filter(Boolean).join(" · ")}</span>
+                        <span className={`peek-timer ${left < 15 * 60 * 1000 ? "urgent" : ""}`}>
+                          {formatLeft(left)} left
+                          {it.type === "food" && it.useBy ? ` · eat by ${untilUseBy(it.useBy)}` : ""}
+                        </span>
+                      </div>
+                      <svg className="peek-go" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M9 6l6 6-6 6" />
+                      </svg>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
           {sheets}
@@ -2492,12 +2543,36 @@ export default function Doorstep() {
             </div>
             </div>
 
-            {visible.length === 0 && (
-              <p className="empty">
-                {q.trim() ? "Nothing matches that search right now." : "Nothing in this category right now."}
-                <br />
-                Have something to pass on instead?
-              </p>
+            {feed.loading && visible.length === 0 && (
+              <div className="feed-loading" aria-hidden="true">
+                <span className="skeleton" />
+                <span className="skeleton" />
+                <span className="skeleton" />
+                <span className="skeleton" />
+              </div>
+            )}
+
+            {!feed.loading && visible.length === 0 && (
+              <div className="empty-state">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M5 8h14l-1.2 11.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z" />
+                  <path d="M9 8V6a3 3 0 0 1 6 0v2" />
+                </svg>
+                <b>
+                  {q.trim()
+                    ? `Nothing matching "${q.trim()}" just now`
+                    : savedOnly
+                      ? "Nothing saved yet"
+                      : typeFilter === "food"
+                        ? "No food going right now"
+                        : "Nothing here right now"}
+                </b>
+                <span>
+                  {q.trim() || filter !== "Going soonest"
+                    ? "Try a wider radius, or add it to your wish list and we'll tell you the moment one appears."
+                    : "Things come and go through the day. Have something to pass on instead?"}
+                </span>
+              </div>
             )}
 
             {feed.more && (

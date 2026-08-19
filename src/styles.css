@@ -1516,34 +1516,133 @@
   box-shadow: 0 4px 14px rgba(20, 38, 31, 0.25);
 }
 
-.pin-dot {
-  width: 17px;
-  height: 17px;
+/* the photograph is the pin — a teardrop with the item inside it */
+.pin {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  border-radius: 50% 50% 50% 4px;
+  transform: rotate(-45deg);
+  background: var(--card);
+  border: 2.5px solid var(--railing);
+  box-shadow: 0 4px 10px rgba(20, 38, 31, 0.3);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform .15s;
+}
+
+.pin img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: rotate(45deg) scale(1.45);
+}
+
+.pin-letter {
+  transform: rotate(45deg);
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 17px;
+  color: var(--railing);
+}
+
+.pin:hover { transform: rotate(-45deg) scale(1.08); }
+.pin.urgent { border-color: var(--signal); }
+.pin.food { border-color: var(--brick); }
+.pin.mine { border-color: var(--brick); border-style: dashed; }
+
+/* the little tail dot under each pin */
+.pin i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin: -3px 0 0 -3px;
   border-radius: 50%;
   background: var(--railing);
-  border: 2.5px solid #FFF;
-  box-shadow: 0 1px 5px rgba(20, 38, 31, 0.4);
+  transform: rotate(45deg) translate(21px, 21px);
 }
 
-.pin-dot.urgent { background: var(--signal); }
-.pin-dot.mine { background: var(--brick); }
+.pin.urgent i { background: var(--signal); }
+.pin.food i, .pin.mine i { background: var(--brick); }
 
-.pin-pop { font-family: var(--body); display: flex; flex-direction: column; gap: 3px; min-width: 130px; }
-.pin-pop strong { font-size: 14px; }
-.pin-pop span { font-size: 12px; color: var(--hush); font-family: var(--meter); }
+/* the card that rises when a pin is tapped */
+.peek {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 1000;
+  background: var(--card);
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(20, 38, 31, 0.28);
+  animation: peek-up .22s ease-out;
+  overflow: hidden;
+}
 
-.pin-pop button {
-  margin-top: 6px;
-  font-family: var(--body);
-  font-size: 12.5px;
-  font-weight: 600;
-  color: #FFF;
-  background: var(--railing);
-  border: none;
-  border-radius: 7px;
-  padding: 6px 10px;
+@keyframes peek-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.peek-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px 12px 12px;
   cursor: pointer;
 }
+
+.peek-photo {
+  width: 58px;
+  height: 58px;
+  flex: none;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--render);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.peek-photo img { width: 100%; height: 100%; object-fit: cover; }
+
+.peek-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+
+.peek-copy b {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 15.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.peek-copy span { font-size: 12.5px; color: var(--hush); }
+.peek-timer { font-family: var(--meter); font-size: 12px !important; color: var(--railing) !important; }
+.peek-timer.urgent { color: var(--brick) !important; }
+.peek-go { color: var(--hush); flex: none; }
+
+.peek-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(20, 38, 31, 0.08);
+  color: var(--hush);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.peek-close:hover { background: rgba(20, 38, 31, 0.16); }
 
 .leaflet-popup-content-wrapper { border-radius: 10px; }
 .leaflet-popup-content { margin: 10px 12px; }
@@ -2028,3 +2127,89 @@
 /* a little more air between the sections of the feed */
 .feed .just-gone { margin-top: 28px; }
 .item-grid, .item-list { margin-top: 4px; }
+
+
+/* ---------- movement ----------
+   Small, quick, and only where it explains something: a card lifting under
+   the thumb, a new listing arriving, a screen settling. Anything longer than
+   about a fifth of a second starts to feel like waiting. */
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.feed > * { animation: fade-up .22s ease-out both; }
+
+/* stagger the first rows so the feed assembles rather than appearing */
+.item-grid > *:nth-child(1), .item-list > *:nth-child(1) { animation: pop-in .2s ease-out both; }
+.item-grid > *:nth-child(2), .item-list > *:nth-child(2) { animation: pop-in .2s ease-out .03s both; }
+.item-grid > *:nth-child(3), .item-list > *:nth-child(3) { animation: pop-in .2s ease-out .06s both; }
+.item-grid > *:nth-child(4), .item-list > *:nth-child(4) { animation: pop-in .2s ease-out .09s both; }
+
+.gcard:active { transform: scale(0.985); }
+.card:active { transform: scale(0.995); }
+.tabbar-btn:active { transform: scale(0.94); }
+.type-pill:active { transform: scale(0.97); }
+.cat-btn:active { transform: scale(0.94); }
+
+/* the urgent countdown chip breathes, so the last minutes read as urgent
+   without anything shouting */
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
+}
+
+.gcard-timer.urgent { animation: pulse-soft 2s ease-in-out infinite; }
+
+.save-star svg { transition: transform .15s; }
+.save-star.on svg { animation: pop-in .22s ease-out; }
+
+.detail-photo img, .gcard-photo img { transition: transform .3s ease-out; }
+.gcard:hover .gcard-photo img { transform: scale(1.04); }
+
+.primary-btn, .give-top, .claim-btn, .ghost-btn { will-change: transform; }
+
+/* a quiet skeleton while a page is on its way */
+.feed-loading {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.skeleton {
+  border-radius: 16px;
+  background: linear-gradient(100deg, var(--card) 30%, #F3F5F0 50%, var(--card) 70%);
+  background-size: 220% 100%;
+  animation: sweep 1.1s linear infinite;
+  height: 210px;
+}
+
+@keyframes sweep {
+  from { background-position: 180% 0; }
+  to { background-position: -80% 0; }
+}
+
+/* nobody should meet a blank screen */
+.empty-state {
+  text-align: center;
+  padding: 34px 18px;
+  color: var(--hush);
+}
+
+.empty-state svg { color: var(--rule); margin-bottom: 12px; }
+.empty-state b { display: block; font-family: var(--display); font-size: 17px; color: var(--ink); margin-bottom: 5px; }
+.empty-state span { font-size: 14px; line-height: 1.55; }
+
+@media (prefers-reduced-motion: reduce) {
+  .feed > *, .item-grid > *, .item-list > *, .skeleton, .gcard-timer.urgent, .peek {
+    animation: none !important;
+  }
+  .gcard:hover .gcard-photo img { transform: none; }
+}
