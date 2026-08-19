@@ -289,6 +289,17 @@ CREATE TABLE IF NOT EXISTS ratings (
   UNIQUE (item_id, rater_id)
 );
 
+/* Fair chance: hands up instead of fastest finger. The window collects
+   requests; the giver picks one, looking at distance and record rather than
+   reaction time. Trash Nothing pledges this; here it is a mode. */
+CREATE TABLE IF NOT EXISTS claim_requests (
+  id      BIGSERIAL PRIMARY KEY,
+  item_id BIGINT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  at      BIGINT NOT NULL,
+  UNIQUE (item_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS saves (
   user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   item_id    BIGINT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
@@ -338,6 +349,10 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS address_verified TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS away_until BIGINT;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS wanted BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS claim_mode TEXT NOT NULL DEFAULT 'instant';
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS last_orders_told BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS under_cover BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS dibs BOOLEAN NOT NULL DEFAULT FALSE;
   `);
 }
 

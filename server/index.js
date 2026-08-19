@@ -15,6 +15,8 @@ import {
 } from "./db.js";
 import { geocodePostcode, milesBetween, formatMiles, approxCoords, FALLBACK } from "./geo.js";
 import { lookupPostcode, hasAddressProvider } from "./address.js";
+import { areaFor } from "./geo.js";
+import { rainOutlook, rainWarning } from "./weather.js";
 import { specFromPhoto, hasCredentials } from "./autospec.js";
 import { impactFor } from "./impact.js";
 
@@ -414,7 +416,7 @@ async function itemContext(items, user) {
   if (!ownerIds.length) return { givers: new Map(), saved: new Set() };
 
   const givers = await query(
-    `SELECT u.id, u.name, u.lat,
+    `SELECT u.id, u.name, u.lat, u.postcode,
             (SELECT COUNT(*) FROM items i WHERE i.owner_id = u.id AND i.collected_at IS NOT NULL) AS handed,
             (SELECT COUNT(*) FROM ratings r WHERE r.ratee_id = u.id) AS rated,
             (SELECT AVG(stars) FROM ratings r WHERE r.ratee_id = u.id) AS stars
@@ -424,6 +426,15 @@ async function itemContext(items, user) {
   const saved = itemIds.length
     ? await query("SELECT item_id FROM saves WHERE user_id = $1 AND item_id = ANY($2::bigint[])", [user.id, itemIds])
     : [];
+  const hands = itemIds.length
+    ? await query("SELECT item_id, user_id FROM claim_requests WHERE item_id = ANY($1::bigint[])", [itemIds])
+    : [];
+  const handCounts = new Map();
+  const handsUp = new Set();
+  for (const h of hands) {
+    handCounts.set(num(h.item_id), (handCounts.get(num(h.item_id)) || 0) + 1);
+    if (num(h.user_id) === user.id) handsUp.add(num(h.item_id));
+  }
 
   return {
     givers: new Map(
@@ -432,6 +443,7 @@ async function itemContext(items, user) {
         {
           id: num(g.id),
           name: String(g.name).split(/\s+/)[0],
+          area: areaFor(g.postcode),
           verified: g.lat != null,
           handed: num(g.handed),
           /* an average of one review is an anecdote; three is a signal */
@@ -441,6 +453,8 @@ async function itemContext(items, user) {
       ])
     ),
     saved: new Set(saved.map((s) => num(s.item_id))),
+    handsUp,
+    handCounts,
   };
 }
 
@@ -471,8 +485,10 @@ function publicItem(it, user, now, ctx) {
   const owner = it.owner_id === user.id;
   const hasGeo = it.lat != null && user.lat != null;
   const miles = hasGeo ? milesBetween(user.lat, user.lng, it.lat, it.lng) : null;
-  /* pin is snapped to a ~110m grid until the viewer has a right to the door */
-  const pin = it.lat != null ? (mine || owner ? { lat: it.lat, lng: it.lng } : approxCoords(it.lat, it.lng)) : null;
+  const lastOrders = inLastOrders(it, now);
+  /* pin is snapped to a ~110m grid until the viewer has a right to the door —
+     or until last orders, when the whole street may as well know */
+  const pin = it.lat != null ? (mine || owner || lastOrders ? { lat: it.lat, lng: it.lng } : approxCoords(it.lat, it.lng)) : null;
   return {
     id: it.id,
     title: it.title,
@@ -481,6 +497,13 @@ function publicItem(it, user, now, ctx) {
     kind: it.kind,
     type: it.type || "nonfood",
     wanted: it.wanted === true,
+    claimMode: it.claim_mode || "instant",
+    lastOrders,
+    underCover: it.under_cover === true,
+    dibs: it.dibs === true,
+    dibsOpensAt: user.guest ? 0 : Math.max(0, dibsOpensAt(it, user) > now ? dibsOpensAt(it, user) : 0),
+    handUp: Boolean(ctx && ctx.handsUp && ctx.handsUp.has(it.id)),
+    hands: ctx && ctx.handCounts ? ctx.handCounts.get(it.id) || 0 : 0,
     useBy: num(it.use_by),
     portions: num(it.portions) || 1,
     dist: miles != null ? formatMiles(miles) : it.dist,
@@ -631,17 +654,61 @@ app.patch(
   })
 );
 
+/* Badges with the progress showing. Olio's are opaque — users say there is
+   no way to know how far the next one is — so every ladder here says "3 of
+   5" out loud. Recognition is the only payment a giver receives. */
+const BADGE_LADDERS = [
+  {
+    track: "given",
+    tiers: [
+      { need: 1, label: "First give", blurb: "One thing saved from the bin" },
+      { need: 5, label: "Streetkeeper", blurb: "Five things rehomed" },
+      { need: 15, label: "Hackney hero", blurb: "Fifteen things rehomed" },
+    ],
+  },
+  {
+    track: "collected",
+    tiers: [
+      { need: 1, label: "First collect", blurb: "Claimed, collected, done" },
+      { need: 5, label: "Regular", blurb: "Five collections made" },
+      { need: 15, label: "Rehomer", blurb: "Fifteen things given a second life" },
+    ],
+  },
+  {
+    track: "thanks",
+    tiers: [
+      { need: 1, label: "Thanked", blurb: "A neighbour said so" },
+      { need: 5, label: "Neighbourhood favourite", blurb: "Five thank-yous received" },
+    ],
+  },
+];
+
+function badgeShelf(counts) {
+  return BADGE_LADDERS.map(({ track, tiers }) => {
+    const have = counts[track] || 0;
+    const earned = tiers.filter((t) => have >= t.need);
+    const next = tiers.find((t) => have < t.need) || null;
+    return {
+      track,
+      earned: earned.map((t) => t.label),
+      current: earned.length ? earned[earned.length - 1].label : null,
+      next: next ? { label: next.label, blurb: next.blurb, have: Math.min(have, next.need), need: next.need } : null,
+    };
+  });
+}
+
 app.get(
   "/api/me",
   auth,
   wrap(async (req, res) => {
     const now = Date.now();
     const { id, name, email, postcode, lat, lng, created_at, address, road, spot } = req.user;
-    const [given, collected, active, strikes] = await Promise.all([
+    const [given, collected, active, strikes, thanked] = await Promise.all([
       one("SELECT COUNT(*) AS n FROM items WHERE owner_id = $1", [id]),
       one("SELECT COUNT(*) AS n FROM items WHERE claimed_by = $1 AND collected_at IS NOT NULL", [id]),
       one("SELECT COUNT(*) AS n FROM items WHERE claimed_by = $1 AND collected_at IS NULL AND claim_expires_at > $2", [id, now]),
       one("SELECT COUNT(*) AS n FROM no_shows WHERE user_id = $1 AND at > $2", [id, now - 30 * 24 * 60 * 60 * 1000]),
+      one("SELECT COUNT(*) AS n FROM thanks WHERE to_id = $1", [id]),
     ]);
     res.json({
       user: {
@@ -656,7 +723,9 @@ app.get(
         road,
         spot,
         away: req.user.away_until != null && num(req.user.away_until) > now,
+        area: areaFor(postcode),
       },
+      badges: badgeShelf({ given: num(given.n), collected: num(collected.n), thanks: num(thanked.n) }),
       stats: {
         given: num(given.n),
         collected: num(collected.n),
@@ -702,6 +771,74 @@ async function sweepLapsedClaims(now) {
   }
 }
 
+/* The last half hour of an unclaimed window is not a deadline, it is last
+   orders: the pin sharpens for everyone and the people who cared — savers,
+   wishers — get one bell. Every competitor's endgame is silence; this one
+   has a designed ending. Food is excluded: urgency and food safety don't mix. */
+const LAST_ORDERS_MS = 30 * 60 * 1000;
+
+const inLastOrders = (it, now) =>
+  !it.wanted &&
+  (it.type || "nonfood") !== "food" &&
+  it.collected_at == null &&
+  it.hidden_at == null &&
+  !(it.claimed_by != null && it.claim_expires_at > now) &&
+  it.expires_at > now &&
+  it.expires_at - now <= LAST_ORDERS_MS;
+
+async function ringLastOrders(now) {
+  const entering = await query(
+    `SELECT * FROM items
+     WHERE NOT last_orders_told AND NOT wanted AND type <> 'food'
+       AND collected_at IS NULL AND hidden_at IS NULL
+       AND (claimed_by IS NULL OR claim_expires_at <= $1)
+       AND expires_at > $1 AND expires_at - $1 <= ${LAST_ORDERS_MS}`,
+    [now]
+  );
+  for (const raw of entering) {
+    const it = castItem(raw);
+    await query("UPDATE items SET last_orders_told = TRUE WHERE id = $1", [it.id]);
+
+    /* one bell for everyone who showed they cared */
+    const savers = await query("SELECT user_id FROM saves WHERE item_id = $1 AND user_id <> $2", [it.id, it.owner_id]);
+    const care = new Set(savers.map((r) => num(r.user_id)));
+    const wishes = await query(WISHES_SQL, [it.owner_id]);
+    for (const w of wishes) if (wishMatches(w, it) != null) care.add(num(w.user_id));
+
+    const minsLeft = Math.max(1, Math.round((it.expires_at - now) / 60000));
+    const body = `Last orders — ${minsLeft} min left and it's still there, on ${it.road}.`;
+    for (const userId of care) {
+      const row = await one(
+        "INSERT INTO notifications (user_id, item_id, title, body, created_at) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+        [userId, it.id, it.title, body, now]
+      );
+      pushTo(userId, { type: "alert", id: num(row.id), itemId: num(it.id), title: it.title, body, createdAt: now });
+    }
+  }
+}
+
+/* First dibs: for the first quarter hour the claim belongs to the streets
+   around the doorstep, then to the mile, then to everyone. Freegle fights
+   the van-driving cherry-picker with a policy; geometry does it better.
+   Returns when the claim opens for this viewer — zero means it's open. */
+const DIBS_TIERS = [
+  { untilMin: 15, withinMiles: 0.25 },
+  { untilMin: 30, withinMiles: 1 },
+];
+
+function dibsOpensAt(it, user) {
+  if (!it.dibs || it.lat == null || user.lat == null) return 0;
+  const miles = milesBetween(user.lat, user.lng, it.lat, it.lng);
+  for (const tier of DIBS_TIERS) {
+    if (miles <= tier.withinMiles) {
+      /* inside this ring: open from the start of its window */
+      const prev = DIBS_TIERS[DIBS_TIERS.indexOf(tier) - 1];
+      return prev ? it.created_at + prev.untilMin * 60 * 1000 : 0;
+    }
+  }
+  return it.created_at + DIBS_TIERS[DIBS_TIERS.length - 1].untilMin * 60 * 1000;
+}
+
 /* The feed is paged: a neighbourhood with a few hundred live listings would
    otherwise send every photograph in one response. */
 const PAGE = 24;
@@ -712,6 +849,7 @@ app.get(
   wrap(async (req, res) => {
     const now = Date.now();
     await sweepLapsedClaims(now);
+    await ringLastOrders(now);
 
     const limit = Math.max(1, Math.min(60, Number(req.query.limit) || PAGE));
     const offset = Math.max(0, Number(req.query.offset) || 0);
@@ -776,9 +914,11 @@ app.get(
 
     /* sorting by distance has to happen in the database, or paging would
        reorder only the slice we happened to fetch */
+    /* id as the final tie-break: two items expiring in the same millisecond
+       must still land on the same page every time */
     const order = nearest
-      ? `ORDER BY (lat IS NULL), ((lat - ${Number(req.user.lat)}) * (lat - ${Number(req.user.lat)}) + (lng - ${Number(req.user.lng)}) * (lng - ${Number(req.user.lng)})), expires_at`
-      : "ORDER BY expires_at";
+      ? `ORDER BY (lat IS NULL), ((lat - ${Number(req.user.lat)}) * (lat - ${Number(req.user.lat)}) + (lng - ${Number(req.user.lng)}) * (lng - ${Number(req.user.lng)})), expires_at, id`
+      : "ORDER BY expires_at, id";
 
     const [{ n: total }] = await query(`SELECT COUNT(*) AS n FROM items WHERE ${visible.clause}`, visible.params);
     const rows = (
@@ -910,7 +1050,11 @@ app.post(
       portions = 1,
       details = null,
       wanted = false,
+      claimMode = "instant",
+      underCover = false,
+      dibs = false,
     } = req.body || {};
+    if (!["instant", "fair"].includes(claimMode)) return fail(res, 400, "First to claim, or you pick", "claimMode");
     const isAsk = wanted === true;
     if (!title.trim()) return fail(res, 400, isAsk ? "Say what you're after" : "Give the item a name", "title");
     /* an ask has no doorstep — nothing is waiting anywhere yet */
@@ -955,8 +1099,8 @@ app.post(
 
     /* the item sits on the giver's own property, so it inherits their coordinates */
     const row = await one(
-      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, photo, photos, spot, postcode, lat, lng, type, use_by, portions, details, wanted)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING *`,
+      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, photo, photos, spot, postcode, lat, lng, type, use_by, portions, details, wanted, claim_mode, under_cover, dibs)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING *`,
       [
         req.user.id,
         title.trim(),
@@ -979,6 +1123,9 @@ app.post(
         servings,
         JSON.stringify(cleanDetails(type, cat, details)),
         isAsk,
+        isAsk ? "instant" : claimMode,
+        underCover === true,
+        dibs === true && !isAsk,
       ]
     );
 
@@ -1590,6 +1737,24 @@ app.post(
       if (claimActive && it.claimed_by !== req.user.id)
         return { status: 409, error: "Someone beat you to it — it's already claimed" };
 
+      /* first dibs: the street's quarter hour is not yours to jump */
+      const opens = dibsOpensAt(it, req.user);
+      if (opens > now) {
+        const at = new Date(opens).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+        return { status: 403, error: `The streets around it get first dibs — it opens to you at ${at}` };
+      }
+
+      /* fair chance: the window collects hands, the giver picks one */
+      if ((it.claim_mode || "instant") === "fair" && !claimActive) {
+        await q("INSERT INTO claim_requests (item_id, user_id, at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [
+          it.id,
+          req.user.id,
+          now,
+        ]);
+        const [{ n: hands }] = await q("SELECT COUNT(*) AS n FROM claim_requests WHERE item_id = $1", [it.id]);
+        return { fair: true, item: it, hands: num(hands) };
+      }
+
       const [updated] = await q("UPDATE items SET claimed_by = $1, claim_expires_at = $2 WHERE id = $3 RETURNING *", [
         req.user.id,
         now + CLAIM_HOLD_MS,
@@ -1599,6 +1764,25 @@ app.post(
     });
 
     if (outcome.error) return fail(res, outcome.status, outcome.error);
+
+    if (outcome.fair) {
+      /* the first hand tells the giver there is choosing to be done */
+      if (outcome.hands === 1) {
+        const row = await one(
+          "INSERT INTO notifications (user_id, item_id, title, body, created_at) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+          [outcome.item.owner_id, outcome.item.id, outcome.item.title, "A hand is up — open the listing to pick who gets it.", now]
+        );
+        pushTo(num(outcome.item.owner_id), {
+          type: "alert",
+          id: num(row.id),
+          itemId: num(outcome.item.id),
+          title: outcome.item.title,
+          body: "A hand is up — open the listing to pick who gets it.",
+          createdAt: now,
+        });
+      }
+      return res.json({ fair: true, hands: outcome.hands });
+    }
 
     /* the claim opens the conversation, and the app writes the first line */
     const convId = await openThread(outcome.item, req.user.id, now);
@@ -1616,6 +1800,98 @@ app.post(
 
     const claimed = await publicOne(outcome.item, req.user, now);
     res.json({ ...claimed, conversationId: convId });
+  })
+);
+
+/* the giver sees who is asking — first name, area, distance, record */
+app.get(
+  "/api/items/:id/hands",
+  auth,
+  wrap(async (req, res) => {
+    const it = castItem(await one("SELECT * FROM items WHERE id = $1", [req.params.id]));
+    if (!it || it.owner_id !== req.user.id) return fail(res, 403, "Only the giver sees the hands");
+    const rows = await query(
+      `SELECT r.user_id, r.at, u.name, u.postcode, u.lat, u.lng,
+              (SELECT COUNT(*) FROM items i WHERE i.claimed_by = u.id AND i.collected_at IS NOT NULL) AS collected,
+              (SELECT COUNT(*) FROM ratings x WHERE x.ratee_id = u.id) AS rated,
+              (SELECT AVG(stars) FROM ratings x WHERE x.ratee_id = u.id) AS stars
+       FROM claim_requests r JOIN users u ON u.id = r.user_id
+       WHERE r.item_id = $1 ORDER BY r.at ASC`,
+      [it.id]
+    );
+    res.json({
+      hands: rows.map((r) => ({
+        userId: num(r.user_id),
+        name: String(r.name).split(/[ ]+/)[0],
+        area: areaFor(r.postcode),
+        miles: r.lat != null && it.lat != null ? formatMiles(milesBetween(r.lat, r.lng, it.lat, it.lng)) : null,
+        collected: num(r.collected),
+        stars: num(r.rated) >= 3 ? Math.round(Number(r.stars) * 10) / 10 : null,
+        at: num(r.at),
+      })),
+    });
+  })
+);
+
+app.post(
+  "/api/items/:id/pick",
+  auth,
+  wrap(async (req, res) => {
+    const now = Date.now();
+    const pickedId = Number((req.body || {}).userId);
+    const outcome = await tx(async (q) => {
+      const [raw] = await q("SELECT * FROM items WHERE id = $1 FOR UPDATE", [req.params.id]);
+      const it = castItem(raw);
+      if (!it || it.owner_id !== req.user.id) return { status: 403, error: "Only the giver picks" };
+      if (it.claimed_by != null && it.claim_expires_at > now) return { status: 409, error: "Already picked" };
+      const hand = await q("SELECT user_id FROM claim_requests WHERE item_id = $1 AND user_id = $2", [it.id, pickedId]);
+      if (!hand.length) return { status: 400, error: "Pick one of the hands that went up" };
+      const [updated] = await q("UPDATE items SET claimed_by = $1, claim_expires_at = $2 WHERE id = $3 RETURNING *", [
+        pickedId,
+        now + CLAIM_HOLD_MS,
+        it.id,
+      ]);
+      return { item: castItem(updated) };
+    });
+    if (outcome.error) return fail(res, outcome.status, outcome.error);
+
+    const it = outcome.item;
+    /* the chosen one hears, the thread opens, the others are let down gently */
+    const convId = await openThread(it, pickedId, now);
+    await threadNote(
+      convId,
+      `${req.user.name.split(/[ ]+/)[0]} picked you for this — it's held for 30 minutes. It'll be waiting ${it.spot === "buzz and collect" ? "once you buzz" : `on the ${it.spot}`} at ${it.address}.`,
+      now
+    );
+    const winRow = await one(
+      "INSERT INTO notifications (user_id, item_id, title, body, created_at) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+      [pickedId, it.id, it.title, "The giver picked you — it's yours for the next 30 minutes.", now]
+    );
+    pushTo(pickedId, {
+      type: "alert",
+      id: num(winRow.id),
+      itemId: num(it.id),
+      title: it.title,
+      body: "The giver picked you — it's yours for the next 30 minutes.",
+      createdAt: now,
+    });
+
+    const others = await query("SELECT user_id FROM claim_requests WHERE item_id = $1 AND user_id <> $2", [it.id, pickedId]);
+    for (const o of others) {
+      const row = await one(
+        "INSERT INTO notifications (user_id, item_id, title, body, created_at) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+        [o.user_id, it.id, it.title, "This one went to another neighbour — thanks for putting your hand up.", now]
+      );
+      pushTo(num(o.user_id), {
+        type: "alert",
+        id: num(row.id),
+        itemId: num(it.id),
+        title: it.title,
+        body: "This one went to another neighbour — thanks for putting your hand up.",
+        createdAt: now,
+      });
+    }
+    res.json({ ok: true, conversationId: convId });
   })
 );
 
@@ -1686,6 +1962,50 @@ app.post(
        guarantees nobody is told about the same item twice */
     await notifyMatchingWishes(fresh, req.user.id);
     res.json(await publicOne(fresh, req.user, now));
+  })
+);
+
+/* what the sky has planned for a doorstep near you */
+app.get(
+  "/api/weather",
+  auth,
+  wrap(async (req, res) => {
+    if (req.user.lat == null) return res.json({ warning: null });
+    const hours = await rainOutlook(req.user.lat, req.user.lng);
+    const windowHours = Math.max(1, Math.min(8, Number(req.query.hours) || 2));
+    res.json({ warning: rainWarning(hours, windowHours) });
+  })
+);
+
+/* Rain check: the most British button in the app. The window shifts back
+   two hours, the bell resets, and everyone who saved it hears why. */
+app.post(
+  "/api/items/:id/raincheck",
+  auth,
+  wrap(async (req, res) => {
+    const now = Date.now();
+    const it = castItem(await one("SELECT * FROM items WHERE id = $1", [req.params.id]));
+    if (!it || it.owner_id !== req.user.id) return fail(res, 403, "Only the giver can call rain");
+    if (it.collected_at != null || it.expires_at <= now) return fail(res, 400, "That window has already closed");
+    if (it.claimed_by != null && it.claim_expires_at > now)
+      return fail(res, 400, "Someone's already on their way — message them instead");
+    if (it.type === "food" && it.use_by && it.expires_at + 2 * 60 * 60 * 1000 > num(it.use_by))
+      return fail(res, 400, "Its use-by date is too close for a delay");
+
+    const newEnd = it.expires_at + 2 * 60 * 60 * 1000;
+    await query("UPDATE items SET expires_at = $1, last_orders_told = FALSE WHERE id = $2", [newEnd, it.id]);
+
+    const when = new Date(newEnd).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    const savers = await query("SELECT user_id FROM saves WHERE item_id = $1 AND user_id <> $2", [it.id, it.owner_id]);
+    for (const r of savers) {
+      const body = `Rain check — it's tucked away for now and back out until ${when}.`;
+      const row = await one(
+        "INSERT INTO notifications (user_id, item_id, title, body, created_at) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+        [r.user_id, it.id, it.title, body, now]
+      );
+      pushTo(num(r.user_id), { type: "alert", id: num(row.id), itemId: num(it.id), title: it.title, body, createdAt: now });
+    }
+    res.json({ ok: true, until: newEnd });
   })
 );
 
@@ -1852,6 +2172,7 @@ app.delete(
       await q("DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE giver_id = $1 OR claimer_id = $1)", [id]);
       await q("DELETE FROM conversations WHERE giver_id = $1 OR claimer_id = $1", [id]);
       await q("DELETE FROM ratings WHERE rater_id = $1 OR ratee_id = $1", [id]);
+      await q("DELETE FROM claim_requests WHERE user_id = $1", [id]);
       await q("DELETE FROM wishes WHERE user_id = $1", [id]);
       await q("DELETE FROM notifications WHERE user_id = $1", [id]);
       await q("DELETE FROM saves WHERE user_id = $1", [id]);

@@ -134,7 +134,9 @@ test("the feed hides addresses and blurs pins until you claim", async () => {
   assert.ok(body.items.length >= 8, "seed listings should be live");
 
   for (const item of body.items) {
-    if (item.status === "live" && !item.owner) {
+    /* during last orders the pin sharpens for everyone by design —
+       the address itself stays hidden even then */
+    if (item.status === "live" && !item.owner && !item.lastOrders) {
       assert.equal(item.address, undefined, `${item.title} leaked an address`);
       assert.equal(item.lat, Math.round(item.lat * 1000) / 1000, "pin should be snapped to the grid");
     }
@@ -1149,4 +1151,126 @@ test("an ask is not an offer: separate feed, no claim, answered with a message",
   /* your own ask takes no offer from you */
   const own = await call(`/items/${ask.body.id}/offer`, { method: "POST", token: asker });
   assert.equal(own.status, 400);
+});
+
+/* ---------------- fair chance, dibs, last orders, rain ---------------- */
+
+test("fair chance: hands go up, the giver picks, everyone hears", async () => {
+  const giver = await newNeighbour("Fair Giver");
+  const near = await newNeighbour("Near Hand");
+  const far = await newNeighbour("Other Hand");
+
+  const listed = await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Velvet pouffe", cat: "Furniture", road: "Test Road, E8", address: "80 Test Road, London E8 3EP", claimMode: "fair" },
+  });
+  assert.equal(listed.body.claimMode, "fair");
+
+  const h1 = await call(`/items/${listed.body.id}/claim`, { method: "POST", token: near });
+  assert.equal(h1.status, 200);
+  assert.equal(h1.body.fair, true);
+  assert.equal(h1.body.hands, 1, "a hand, not a hold");
+  const h2 = await call(`/items/${listed.body.id}/claim`, { method: "POST", token: far });
+  assert.equal(h2.body.hands, 2);
+
+  /* the giver sees who is asking */
+  const hands = await call(`/items/${listed.body.id}/hands`, { token: giver });
+  assert.equal(hands.body.hands.length, 2);
+  const nearId = hands.body.hands[0].userId;
+
+  /* a stranger cannot look */
+  const nosy = await newNeighbour("Nosy Hands");
+  assert.equal((await call(`/items/${listed.body.id}/hands`, { token: nosy })).status, 403);
+
+  /* the pick assigns the hold and opens the thread */
+  const picked = await call(`/items/${listed.body.id}/pick`, { method: "POST", token: giver, body: { userId: nearId } });
+  assert.equal(picked.status, 200);
+  assert.ok(picked.body.conversationId > 0);
+  const thread = await call(`/chats/${picked.body.conversationId}`, { token: near });
+  assert.ok(thread.body.messages.some((m) => m.system && /picked you/.test(m.body)));
+
+  /* the other hand was let down gently */
+  const notes = await call("/notifications", { token: far });
+  assert.ok(notes.body.notifications.some((n) => /another neighbour/.test(n.body)));
+
+  /* picking someone whose hand never went up is refused */
+  const rogue = await call(`/items/${listed.body.id}/pick`, { method: "POST", token: giver, body: { userId: 99999 } });
+  assert.ok(rogue.status >= 400);
+});
+
+test("first dibs holds the door for the street", async () => {
+  const giver = await newNeighbour("Dibs Giver"); /* E8 3EP */
+  const listed = await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Ottoman with dibs", cat: "Furniture", road: "Test Road, E8", address: "81 Test Road, London E8 3EP", dibs: true },
+  });
+  assert.equal(listed.body.dibs, true);
+
+  /* a neighbour registered far away is told when it opens, not refused outright */
+  const farAway = await call("/auth/signup", {
+    method: "POST",
+    body: { name: "Distant Claimer", email: `dibs${Date.now()}@x.uk`, postcode: "N16 0SS", password: "doorstep123" },
+  });
+  const tried = await call(`/items/${listed.body.id}/claim`, { method: "POST", token: farAway.body.token });
+  assert.equal(tried.status, 403);
+  assert.match(tried.body.error, /first dibs.*opens to you at/i);
+
+  /* and the item shape says when */
+  const feed = await call("/items?q=ottoman", { token: farAway.body.token });
+  const it = feed.body.items.find((i) => i.id === listed.body.id);
+  assert.ok(it.dibsOpensAt > Date.now(), "the wait is visible, not a surprise");
+});
+
+test("last orders sharpens the pin and rings the bell once", async () => {
+  const giver = await newNeighbour("Closing Giver");
+  const watcher = await newNeighbour("Hopeful Watcher");
+
+  /* a 20-minute window is born inside last orders */
+  const listed = await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Zanzibar clock", cat: "Furniture", road: "Test Road, E8", address: "82 Test Road, London E8 3EP", windowMinutes: 20 },
+  });
+  await call(`/items/${listed.body.id}/save`, { method: "POST", token: watcher });
+
+  /* the sweep runs on every feed request */
+  const feed = await call("/items?q=zanzibar", { token: watcher });
+  const it = feed.body.items.find((i) => i.id === listed.body.id);
+  assert.equal(it.lastOrders, true);
+  assert.equal(it.address, undefined, "the address stays hidden even at last orders");
+  assert.notEqual(it.lat, Math.round(it.lat * 1000) / 1000, "the pin sharpens off the fuzzing grid");
+
+  const notes = await call("/notifications", { token: watcher });
+  const bells = notes.body.notifications.filter((n) => /Last orders/.test(n.body));
+  assert.equal(bells.length, 1, "the bell rings once");
+
+  /* asking again does not ring it twice */
+  await call("/items?q=zanzibar", { token: watcher });
+  const again = await call("/notifications", { token: watcher });
+  assert.equal(again.body.notifications.filter((n) => /Last orders/.test(n.body)).length, 1);
+});
+
+test("rain check pushes the window back and tells the savers", async () => {
+  const giver = await newNeighbour("Soggy Giver");
+  const saver = await newNeighbour("Dry Saver");
+  const listed = await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Wicker chair for rain", cat: "Furniture", road: "Test Road, E8", address: "83 Test Road, London E8 3EP" },
+  });
+  await call(`/items/${listed.body.id}/save`, { method: "POST", token: saver });
+
+  const before = (await call("/items?q=wicker", { token: saver })).body.items[0].expiresAt;
+  const checked = await call(`/items/${listed.body.id}/raincheck`, { method: "POST", token: giver });
+  assert.equal(checked.status, 200);
+  assert.equal(checked.body.until, before + 2 * 60 * 60 * 1000, "two hours later, exactly");
+
+  const notes = await call("/notifications", { token: saver });
+  assert.ok(notes.body.notifications.some((n) => /Rain check/.test(n.body)), "the saver heard");
+
+  /* only the giver holds the umbrella */
+  const cheeky = await call(`/items/${listed.body.id}/raincheck`, { method: "POST", token: saver });
+  assert.equal(cheeky.status, 403);
 });

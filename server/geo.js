@@ -54,3 +54,39 @@ export async function geocodePostcode(postcode) {
 export function approxCoords(lat, lng) {
   return { lat: Math.round(lat * 1000) / 1000, lng: Math.round(lng * 1000) / 1000 };
 }
+
+
+/* The name a local would use, from the postcode's outward half. Nextdoor
+   spends real money deriving neighbourhood boundaries; for a Hackney launch
+   a district map does the same job for free, and "London Fields" warms a
+   card in a way "E8" never will. */
+const AREA_BY_DISTRICT = {
+  E8: "London Fields",
+  E5: "Clapton",
+  E9: "Homerton",
+  E2: "Bethnal Green",
+  E3: "Bow",
+  N16: "Stoke Newington",
+  N1: "De Beauvoir",
+  N4: "Finsbury Park",
+  N5: "Highbury",
+  E10: "Leyton",
+  E11: "Leytonstone",
+  E17: "Walthamstow",
+  EC1: "Clerkenwell",
+  EC2: "Shoreditch",
+};
+
+export function areaFor(postcode) {
+  /* the outward code, whether or not anyone typed the space: the inward half
+     is always digit-letter-letter, so peel that off a full postcode first */
+  const clean = String(postcode || "").trim().toUpperCase().replace(/[ ]+/g, "");
+  const full = clean.match(/^([A-Z]{1,2}[0-9][A-Z0-9]?)[0-9][A-Z]{2}$/);
+  const m = full || clean.match(/^([A-Z]{1,2}[0-9][A-Z0-9]?)$/);
+  if (!m) return null;
+  const outward = m[1];
+  if (AREA_BY_DISTRICT[outward]) return AREA_BY_DISTRICT[outward];
+  /* strip the trailing letter of districts like E8A, then give up gracefully */
+  const stem = outward.replace(/[A-Z]$/, "");
+  return AREA_BY_DISTRICT[stem] || null;
+}

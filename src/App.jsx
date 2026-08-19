@@ -355,6 +355,9 @@ const RADII = [
 const EMPTY_GIVE = {
   type: "nonfood",
   wanted: false,
+  claimMode: "instant",
+  underCover: false,
+  dibs: false,
   title: "",
   note: "",
   cat: "Furniture",
@@ -448,6 +451,7 @@ export default function Doorstep() {
   const [giveErrors, setGiveErrors] = useState({});
   const [detailId, setDetailId] = useState(null);
   const [stats, setStats] = useState(null);
+  const [badges, setBadges] = useState([]);
   const [notes, setNotes] = useState([]);
   const [unread, setUnread] = useState(0);
   const [wishes, setWishes] = useState([]);
@@ -461,6 +465,8 @@ export default function Doorstep() {
   const [chatUnread, setChatUnread] = useState(0);
   const [chatId, setChatId] = useState(null);
   const [thread, setThread] = useState(null);
+  const [hands, setHands] = useState([]);
+  const [sky, setSky] = useState(null);
   const [draft, setDraft] = useState("");
   const chatEnd = useRef(null);
   const [reporting, setReporting] = useState(null);
@@ -570,6 +576,7 @@ export default function Doorstep() {
       .then((data) => {
         setUser(data.user);
         setStats(data.stats);
+        setBadges(data.badges || []);
         setScreen("home");
       })
       .catch(() => {
@@ -588,6 +595,7 @@ export default function Doorstep() {
       .then((data) => {
         setUser(data.user);
         setStats(data.stats);
+        setBadges(data.badges || []);
       })
       .catch(() => {});
   }, [screen, token]);
@@ -668,6 +676,14 @@ export default function Doorstep() {
     }
     if (screen === "impact") api("/impact", { token }).then(setImpact).catch(() => {});
     if (screen === "chats") api("/chats", { token }).then((d) => { setChats(d.chats); setChatUnread(d.unread); }).catch(() => {});
+    if (screen === "detail" && detailId) {
+      const it = items.find((x) => x.id === detailId);
+      if (it && it.owner && it.claimMode === "fair") {
+        api(`/items/${detailId}/hands`, { token }).then((d) => setHands(d.hands)).catch(() => setHands([]));
+      } else {
+        setHands([]);
+      }
+    }
     if (screen === "chat" && chatId) {
       api(`/chats/${chatId}`, { token }).then((d) => {
         setThread(d);
@@ -678,6 +694,7 @@ export default function Doorstep() {
     if (screen === "profile") api("/blocks", { token }).then((d) => setBlocked(d.blocked)).catch(() => {});
     if (screen === "give") {
       api("/autospec/status", { token }).then((d) => setAutospec((a) => ({ ...a, configured: d.configured }))).catch(() => {});
+      api("/weather?hours=4", { token }).then((d) => setSky(d.warning)).catch(() => setSky(null));
       /* your usual address and spot, so listing again is two taps */
       if (user && user.address) {
         setGive((g) => ({
@@ -909,6 +926,16 @@ export default function Doorstep() {
     if (needsAccount(`Sign in to claim ${item.title.toLowerCase()}`, { action: "claim", id: item.id })) return;
     try {
       const updated = await api(`/items/${item.id}/claim`, { method: "POST", token });
+      if (updated.fair) {
+        /* no race here — a hand went up, and the giver will pick */
+        setItems((list) => list.map((it) => (it.id === item.id ? { ...it, handUp: true, hands: updated.hands } : it)));
+        setToast(
+          updated.hands === 1
+            ? "Your hand's up — you're the first to ask. The giver picks."
+            : `Your hand's up — ${updated.hands} asking so far. The giver picks.`
+        );
+        return;
+      }
       setItems((list) => list.map((it) => (it.id === updated.id ? updated : it)));
       setToast(`Claimed. ${whereLine(updated)} Collect within 30 minutes.`);
     } catch (e) {
@@ -1426,6 +1453,9 @@ export default function Doorstep() {
           photos: give.photos,
           spot: give.spot,
           wanted: give.wanted,
+          claimMode: give.claimMode,
+          underCover: give.underCover,
+          dibs: give.dibs,
         },
       });
       setItems((list) => [...list, created]);
@@ -1930,7 +1960,10 @@ export default function Doorstep() {
                   <div className="giver-card">
                     <span className="giver-avatar">{item.giver.name.slice(0, 1).toUpperCase()}</span>
                     <span className="giver-lines">
-                      <b>{item.giver.name}</b>
+                      <b>
+                        {item.giver.name}
+                        {item.giver.area && <em className="giver-area"> · {item.giver.area}</em>}
+                      </b>
                       <small>
                         {item.giver.stars != null && (
                           <span className="giver-stars">
@@ -1961,6 +1994,42 @@ export default function Doorstep() {
                   </div>
                 </div>
 
+                {item.owner && item.claimMode === "fair" && item.status !== "taken" && hands.length > 0 && (
+                  <div className="hands-panel">
+                    <p className="sub-head">{hands.length === 1 ? "One hand up" : `${hands.length} hands up`} — you pick</p>
+                    {hands.map((h) => (
+                      <div key={h.userId} className="hand-row">
+                        <span className="hand-copy">
+                          <b>
+                            {h.name}
+                            {h.area && <em> · {h.area}</em>}
+                          </b>
+                          <small>
+                            {[h.miles, h.collected > 0 ? `${h.collected} collected` : "first collection", h.stars != null ? `★ ${h.stars}` : null]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </small>
+                        </span>
+                        <button
+                          className="hand-pick"
+                          onClick={async () => {
+                            try {
+                              await api(`/items/${item.id}/pick`, { method: "POST", token, body: { userId: h.userId } });
+                              setToast(`${h.name} gets it — they've been told, and the thread is open.`);
+                              setHands([]);
+                              refresh();
+                            } catch (e) {
+                              setToast(e.message);
+                            }
+                          }}
+                        >
+                          Pick
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {(mine || item.owner) && (
                   <div className="rule-card address-card">
                     <p className="rule-title">{mine ? "Your collection address" : "Your listing"}</p>
@@ -1974,6 +2043,26 @@ export default function Doorstep() {
                       )}
                     </p>
                   </div>
+                )}
+
+                {item.owner && !item.wanted && item.status !== "taken" && (
+                  <button
+                    className="ghost-btn rain-btn"
+                    onClick={async () => {
+                      try {
+                        const d = await api(`/items/${item.id}/raincheck`, { method: "POST", token });
+                        setToast(
+                          `Rain check called — back out until ${new Date(d.until).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}. Savers have been told.`
+                        );
+                        refresh();
+                      } catch (e) {
+                        setToast(e.message);
+                      }
+                    }}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 16.6A5 5 0 0 0 18 7h-1.3A7 7 0 1 0 5 15.3" /><path d="M8 19v2M12 20v2M16 19v2" /></svg>
+                    Rain check — push it back two hours
+                  </button>
                 )}
 
                 {item.wanted && !item.owner && (
@@ -1999,11 +2088,33 @@ export default function Doorstep() {
                     </button>
                   </div>
                 )}
-                {!item.wanted && !mine && !item.owner && (
+                {!item.wanted && !mine && !item.owner && !(item.dibsOpensAt > now) && item.claimMode === "fair" && item.status !== "taken" && (
+                  <div className="claim-dock">
+                    <span className="claim-left">
+                      <b>{formatLeft(item.expiresAt - now)}</b>
+                      <small>{item.hands === 1 ? "1 hand up" : `${item.hands || 0} hands up`}</small>
+                    </span>
+                    <button className="primary-btn claim-cta" disabled={item.handUp} onClick={() => claim(item)}>
+                      {item.handUp ? "Your hand's up — giver picks" : "Put my hand up"}
+                    </button>
+                  </div>
+                )}
+                {!item.wanted && !mine && !item.owner && item.dibsOpensAt > now && item.status !== "taken" && (
+                  <div className="claim-dock">
+                    <span className="claim-left">
+                      <b>{formatLeft(item.dibsOpensAt - now)}</b>
+                      <small>street's dibs first</small>
+                    </span>
+                    <button className="primary-btn claim-cta" disabled>
+                      Opens to you at {new Date(item.dibsOpensAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                    </button>
+                  </div>
+                )}
+                {!item.wanted && !mine && !item.owner && !(item.dibsOpensAt > now) && !(item.claimMode === "fair" && item.status !== "taken") && (
                   <div className="claim-dock">
                     <span className="claim-left">
                       <b className={item.expiresAt - now < 15 * 60 * 1000 ? "urgent" : ""}>{formatLeft(item.expiresAt - now)}</b>
-                      <small>{taken ? "someone got there first" : "left to claim"}</small>
+                      <small>{taken ? "someone got there first" : item.lastOrders ? "last orders — exact pin's on the map" : "left to claim"}</small>
                     </span>
                     <button className="primary-btn claim-cta" disabled={taken} onClick={() => claim(item)}>
                       {taken ? "Already claimed" : "Claim it — free"}
@@ -2609,7 +2720,8 @@ export default function Doorstep() {
                 </div>
                 <h1 className="profile-name">{user ? user.name : ""}</h1>
                 <p className="profile-meta">{user ? user.email : ""}</p>
-                <p className="profile-meta">
+                  <p className="profile-meta">
+                  {user && user.area ? `${user.area} · ` : ""}
                   {user ? user.postcode.toUpperCase() : ""}
                   {since ? ` · Doorstepper since ${since}` : ""}
                 </p>
@@ -2641,6 +2753,40 @@ export default function Doorstep() {
                 <p className="profile-claims strike-warn">
                   Claiming is paused — three claims went uncollected this month.
                 </p>
+              )}
+
+              {badges.length > 0 && (
+                <div className="badge-shelf">
+                  <p className="sub-head">Badges</p>
+                  {badges.map((b) => (
+                    <div key={b.track} className={`badge-row ${b.current ? "earned" : ""}`}>
+                      <span className="badge-medal" aria-hidden="true">
+                        {b.track === "given" ? (
+                          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 12v9H4v-9" /><path d="M2 7h20v5H2z" /><path d="M12 22V7" /><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" /><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" /></svg>
+                        ) : b.track === "collected" ? (
+                          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 8h14l-1.2 11.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z" /><path d="M9 8V6a3 3 0 0 1 6 0v2" /></svg>
+                        ) : (
+                          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 20.5S3.5 15 3.5 9.2A4.2 4.2 0 0 1 12 7a4.2 4.2 0 0 1 8.5 2.2c0 5.8-8.5 11.3-8.5 11.3Z" /></svg>
+                        )}
+                      </span>
+                      <span className="badge-copy">
+                        <b>{b.current || b.next.label}</b>
+                        {b.next ? (
+                          <small>
+                            {b.next.have} of {b.next.need} to {b.current ? b.next.label.toLowerCase() : "earn it"}
+                          </small>
+                        ) : (
+                          <small>The whole ladder — there's nothing above this</small>
+                        )}
+                      </span>
+                      {b.next && (
+                        <span className="badge-track" aria-hidden="true">
+                          <i style={{ width: `${Math.round((b.next.have / b.next.need) * 100)}%` }} />
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
               )}
 
               <div className="rule-card">
@@ -3010,6 +3156,62 @@ export default function Doorstep() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {!give.wanted && sky && (
+                <div className="rain-note">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 16.6A5 5 0 0 0 18 7h-1.3A7 7 0 1 0 5 15.3" /><path d="M8 19v2M12 20v2M16 19v2" /></svg>
+                  <span>
+                    Rain looks likely from <b>{sky.from}</b> ({sky.prob}%). A shorter window, or somewhere under cover?
+                  </span>
+                </div>
+              )}
+              {!give.wanted && (
+                <label className="cover-row">
+                  <input
+                    type="checkbox"
+                    checked={give.underCover}
+                    onChange={(e) => setGive((g) => ({ ...g, underCover: e.target.checked }))}
+                  />
+                  <span>It'll be under cover — porch, lobby or sheltered step</span>
+                </label>
+              )}
+              {!give.wanted && (
+                <label className="cover-row">
+                  <input
+                    type="checkbox"
+                    checked={give.dibs}
+                    onChange={(e) => setGive((g) => ({ ...g, dibs: e.target.checked }))}
+                  />
+                  <span>
+                    My street gets first dibs — the first 15 minutes belong to neighbours within a quarter
+                    mile, then it opens out
+                  </span>
+                </label>
+              )}
+
+              <div className="field">
+                <label>Who gets it</label>
+                <div className="chips" role="group" aria-label="Claim mode">
+                  {[
+                    { v: "instant", label: "First to claim" },
+                    { v: "fair", label: "I'll pick — fair chance" },
+                  ].map((m) => (
+                    <button
+                      key={m.v}
+                      className="chip"
+                      aria-pressed={give.claimMode === m.v}
+                      onClick={() => setGive((g) => ({ ...g, claimMode: m.v }))}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+                {give.claimMode === "fair" && (
+                  <p className="safety-note">
+                    Hands go up instead of a race. You'll see who's asking — how near, how reliable — and pick.
+                  </p>
+                )}
               </div>
 
               {give.type === "food" && (
@@ -3579,7 +3781,9 @@ export default function Doorstep() {
                             </svg>
                           </button>
                         )}
-                        <span className={`gcard-timer ${urgent ? "urgent" : ""}`}>{formatLeft(remaining)}</span>
+                        <span className={`gcard-timer ${item.lastOrders ? "last-orders" : urgent ? "urgent" : ""}`}>
+                          {item.lastOrders ? `Last orders · ${formatLeft(remaining)}` : formatLeft(remaining)}
+                        </span>
                         {item.dist && <span className="gcard-dist">{item.dist}</span>}
                         {item.wanted && <span className="gcard-want">Wanted</span>}
                         {item.type === "food" && !item.wanted && !gone && !mine && !item.owner && (
