@@ -14,6 +14,7 @@ import {
   photoLibrary,
 } from "./db.js";
 import { geocodePostcode, milesBetween, formatMiles, approxCoords, FALLBACK } from "./geo.js";
+import { lookupPostcode, hasAddressProvider } from "./address.js";
 import { specFromPhoto, hasCredentials } from "./autospec.js";
 import { impactFor } from "./impact.js";
 
@@ -266,13 +267,21 @@ function wishMatches(wish, item) {
   return miles <= wish.radius ? miles : null;
 }
 
-/* Tell one wisher about one item, at most once ever for that pairing. */
+/* Tell one wisher about one item, at most once ever — remembered against the
+   person, not the wish row, so removing a wish and adding it back doesn't
+   replay alerts they have already read. */
 async function tellWisher(wish, item, miles, { alreadyLive = false } = {}) {
   const now = Date.now();
   const claimed = await query(
-    "INSERT INTO wish_hits (wish_id, item_id, at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING RETURNING wish_id",
-    [wish.id, item.id, now]
+    "INSERT INTO wish_told (user_id, item_id, at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING RETURNING user_id",
+    [wish.user_id, item.id, now]
   );
+  /* the counter is per wish, so it still records the match either way */
+  await query("INSERT INTO wish_hits (wish_id, item_id, at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [
+    wish.id,
+    item.id,
+    now,
+  ]);
   if (!claimed.length) return false; /* already told them */
 
   const body = alreadyLive
@@ -374,7 +383,19 @@ async function startSession(user) {
   await query("INSERT INTO sessions (token, user_id, created_at) VALUES ($1,$2,$3)", [token, user.id, Date.now()]);
   return {
     token,
-    user: { id: num(user.id), name: user.name, email: user.email, postcode: user.postcode, lat: user.lat, lng: user.lng },
+    /* the address travels with the session, so the give form can fill itself
+       in the moment someone lists their first thing */
+    user: {
+      id: num(user.id),
+      name: user.name,
+      email: user.email,
+      postcode: user.postcode,
+      lat: user.lat,
+      lng: user.lng,
+      address: user.address || null,
+      road: user.road || null,
+      spot: user.spot || null,
+    },
   };
 }
 
@@ -484,12 +505,36 @@ async function publicOne(it, user, now) {
   return publicItem(it, user, now, ctx);
 }
 
+/* ---------------- addresses ---------------- */
+
+/* Someone types their postcode; we tell them what we can about it. With a
+   licensed provider configured this returns the actual houses to pick from.
+   Without one it returns the verified postcode and the street name, and the
+   person adds their own house number — which is what the government's own
+   address-entry guidance recommends as a sound default. */
+app.get(
+  "/api/address",
+  wrap(async (req, res) => {
+    const postcode = String(req.query.postcode || "").trim();
+    if (!POSTCODE_RE.test(postcode))
+      return fail(res, 400, "Enter a full UK postcode, like E8 3EP", "postcode");
+
+    const found = await lookupPostcode(postcode);
+    if (!found.ok) {
+      if (found.reason === "invalid")
+        return fail(res, 404, "We can't find that postcode — double-check it", "postcode");
+      return fail(res, 503, "Address lookup is having a moment — type your address instead", "postcode");
+    }
+    res.json(found);
+  })
+);
+
 /* ---------------- auth ---------------- */
 
 app.post(
   "/api/auth/signup",
   wrap(async (req, res) => {
-    const { name = "", email = "", postcode = "", password = "" } = req.body || {};
+    const { name = "", email = "", postcode = "", password = "", address = "", road = "", uprn = null } = req.body || {};
     if (!name.trim()) return fail(res, 400, "Tell us what to call you", "name");
     if (!EMAIL_RE.test(email)) return fail(res, 400, "That email doesn't look right", "email");
     if (!POSTCODE_RE.test(postcode.trim())) return fail(res, 400, "Enter a full UK postcode, like E8 3EP", "postcode");
@@ -505,9 +550,26 @@ app.post(
       return fail(res, 400, "That postcode doesn't seem to exist — double-check it", "postcode");
     const { lat, lng } = geo.ok ? geo : FALLBACK;
 
+    /* how sure we are of the address, so records can be upgraded later
+       without asking anyone to type theirs again */
+    const level = uprn ? "uprn" : String(address).trim() ? "postcode" : "none";
+
     const row = await one(
-      "INSERT INTO users (name, email, postcode, password_hash, created_at, lat, lng) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *",
-      [name.trim(), foldEmail(email), postcode.trim().toUpperCase(), hashPassword(password), Date.now(), lat, lng]
+      `INSERT INTO users (name, email, postcode, password_hash, created_at, lat, lng, address, road, uprn, address_verified)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [
+        name.trim(),
+        foldEmail(email),
+        postcode.trim().toUpperCase(),
+        hashPassword(password),
+        Date.now(),
+        lat,
+        lng,
+        String(address).trim() || null,
+        String(road).trim() || null,
+        uprn ? String(uprn) : null,
+        level,
+      ]
     );
     res.status(201).json(await startSession(castUser(row)));
   })
@@ -1027,16 +1089,33 @@ app.post(
 
 /* ---- the wish list ---- */
 
+/* How many things are up RIGHT NOW for each wish. A count of past alerts is
+   no use to anyone — what a wisher wants to know is whether there is
+   something to go and collect today. */
+async function liveMatchCounts(wishes, user) {
+  if (!wishes.length) return new Map();
+  const live = await query(
+    `SELECT id, title, note, road, cat, lat, lng FROM items
+     WHERE owner_id <> $1 AND claimed_by IS NULL AND expires_at > $2 AND hidden_at IS NULL`,
+    [user.id, Date.now()]
+  );
+  const counts = new Map();
+  for (const w of wishes) {
+    const shaped = { ...w, ulat: user.lat, ulng: user.lng };
+    counts.set(num(w.id), live.filter((it) => wishMatches(shaped, it) !== null).length);
+  }
+  return counts;
+}
+
 app.get(
   "/api/wishes",
   auth,
   wrap(async (req, res) => {
     const rows = await query(
-      `SELECT w.id, w.keyword, w.cat, w.radius, w.created_at,
-              (SELECT COUNT(*) FROM wish_hits h WHERE h.wish_id = w.id) AS found
-       FROM wishes w WHERE w.user_id = $1 ORDER BY w.id DESC`,
+      "SELECT id, keyword, cat, radius, created_at FROM wishes WHERE user_id = $1 ORDER BY id DESC",
       [req.user.id]
     );
+    const counts = await liveMatchCounts(rows, req.user);
     res.json({
       wishes: rows.map((w) => ({
         id: num(w.id),
@@ -1044,7 +1123,7 @@ app.get(
         cat: w.cat,
         radius: w.radius,
         createdAt: num(w.created_at),
-        found: num(w.found),
+        upNow: counts.get(num(w.id)) || 0,
       })),
     });
   })
@@ -1060,10 +1139,20 @@ app.post(
     const { n } = await one("SELECT COUNT(*) AS n FROM wishes WHERE user_id = $1", [req.user.id]);
     if (num(n) >= 10) return fail(res, 400, "Ten wishes is the limit — remove one first");
 
-    const r = Math.max(0.25, Math.min(5, Number(radius) || 1));
+    const r = Math.max(0.25, Math.min(10, Number(radius) || 1));
+
+    /* the same wish twice would just mean two identical rows and no extra
+       alerts, so say so rather than quietly adding it again */
+    const already = await one(
+      "SELECT id FROM wishes WHERE user_id = $1 AND LOWER(keyword) = LOWER($2) AND cat = $3",
+      [req.user.id, keyword.trim(), cat]
+    );
+    if (already) return fail(res, 409, "That's already on your wish list", "keyword");
+
+    const createdAt = Date.now();
     const row = await one(
       "INSERT INTO wishes (user_id, keyword, cat, radius, created_at) VALUES ($1,$2,$3,$4,$5) RETURNING id",
-      [req.user.id, keyword.trim(), cat, r, Date.now()]
+      [req.user.id, keyword.trim(), cat, r, createdAt]
     );
 
     /* check what is already out there before promising to watch the future */
@@ -1073,7 +1162,16 @@ app.post(
     );
     const alreadyOut = await notifyExistingMatches(wish);
 
-    res.status(201).json({ id: num(row.id), keyword: keyword.trim(), cat, radius: r, found: alreadyOut, alreadyOut });
+    const counts = await liveMatchCounts([{ ...wish, id: row.id }], req.user);
+    res.status(201).json({
+      id: num(row.id),
+      keyword: keyword.trim(),
+      cat,
+      radius: r,
+      createdAt,
+      upNow: counts.get(num(row.id)) || 0,
+      alreadyOut,
+    });
   })
 );
 
@@ -1404,6 +1502,7 @@ app.delete(
       await q("UPDATE items SET claimed_by = NULL, claim_expires_at = NULL WHERE claimed_by = $1 AND collected_at IS NULL", [id]);
       await q("UPDATE items SET address = 'removed' WHERE owner_id = $1", [id]);
       await q("DELETE FROM wish_hits WHERE wish_id IN (SELECT id FROM wishes WHERE user_id = $1)", [id]);
+      await q("DELETE FROM wish_told WHERE user_id = $1", [id]);
       await q("DELETE FROM wishes WHERE user_id = $1", [id]);
       await q("DELETE FROM notifications WHERE user_id = $1", [id]);
       await q("DELETE FROM saves WHERE user_id = $1", [id]);

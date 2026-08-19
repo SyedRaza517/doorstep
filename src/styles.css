@@ -2447,7 +2447,8 @@
   font-weight: 500;
 }
 
-.radius-set input[type="range"] {
+.radius-set input[type="range"],
+input.range {
   width: 100%;
   height: 4px;
   border-radius: 3px;
@@ -2456,7 +2457,8 @@
   outline: none;
 }
 
-.radius-set input[type="range"]::-webkit-slider-thumb {
+.radius-set input[type="range"]::-webkit-slider-thumb,
+input.range::-webkit-slider-thumb {
   appearance: none;
   width: 22px;
   height: 22px;
@@ -2467,7 +2469,8 @@
   cursor: pointer;
 }
 
-.radius-set input[type="range"]::-moz-range-thumb {
+.radius-set input[type="range"]::-moz-range-thumb,
+input.range::-moz-range-thumb {
   width: 22px;
   height: 22px;
   border-radius: 50%;
@@ -2476,7 +2479,8 @@
   cursor: pointer;
 }
 
-.radius-set input[type="range"]:focus-visible { outline: 2px solid var(--railing); outline-offset: 4px; }
+.radius-set input[type="range"]:focus-visible,
+input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4px; }
 
 .radius-ends {
   display: flex;
@@ -2566,3 +2570,231 @@
 }
 
 .hints button em.food { background: var(--signal); color: var(--ink); }
+
+/* ---------- the wish list ---------- */
+
+.wish-compose {
+  background: var(--render);
+  border: 1px solid rgba(35, 74, 59, 0.12);
+  border-radius: 18px;
+  padding: 16px 14px 14px;
+  margin-bottom: 20px;
+}
+.wish-compose .field { margin-bottom: 14px; }
+.wish-compose .primary-btn { width: 100%; margin-top: 4px; }
+.wish-compose .primary-btn:disabled {
+  background: rgba(35, 74, 59, 0.16);
+  color: rgba(35, 74, 59, 0.5);
+  cursor: default;
+  box-shadow: none;
+}
+.wish-compose .field-hint {
+  margin: 8px 2px 0;
+  font-size: 12px;
+  color: rgba(35, 74, 59, 0.6);
+  text-align: center;
+}
+
+/* categories as pictures, the same artwork the feed uses */
+.wish-cats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.wish-cat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 2px 7px;
+  border: 1px solid rgba(35, 74, 59, 0.14);
+  border-radius: 14px;
+  background: #fff;
+  color: var(--railing);
+  cursor: pointer;
+  min-width: 0;
+}
+.wish-cat small {
+  font-size: 10.5px;
+  line-height: 1.15;
+  text-align: center;
+  /* two lines rather than "Store cupb…" — the whole point is that you can
+     read which category you're picking */
+  max-width: 100%;
+  min-height: 2.3em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wish-cat-art {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--render);
+  flex: none;
+}
+.wish-cat-art img { width: 100%; height: 100%; object-fit: cover; }
+.wish-cat[aria-pressed="true"] {
+  border-color: var(--railing);
+  background: var(--railing);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(35, 74, 59, 0.22);
+}
+.wish-cat[aria-pressed="true"] .wish-cat-art { background: rgba(255, 255, 255, 0.16); }
+
+.range-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: rgba(35, 74, 59, 0.55);
+  margin-top: 2px;
+}
+
+/* the rows themselves */
+.wish-list { display: flex; flex-direction: column; gap: 10px; padding-bottom: 76px; }
+.wish-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid rgba(35, 74, 59, 0.12);
+  border-left: 4px solid var(--signal);
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(35, 74, 59, 0.06);
+}
+.wish-art {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--render);
+  display: grid;
+  place-items: center;
+  color: var(--railing);
+}
+.wish-art img { width: 100%; height: 100%; object-fit: cover; }
+.wish-what { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.wish-what b {
+  font-size: 15px;
+  color: var(--railing);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wish-what small { font-size: 11.5px; color: rgba(35, 74, 59, 0.62); }
+.wish-side { display: flex; align-items: center; gap: 6px; flex: none; }
+
+/* something is actually up right now — the whole point of a wish */
+.wish-live {
+  border: 0;
+  background: var(--signal);
+  color: var(--railing);
+  font-weight: 700;
+  font-size: 11.5px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wish-watch {
+  font-size: 11px;
+  color: rgba(35, 74, 59, 0.5);
+  background: var(--render);
+  padding: 5px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.wish-x {
+  border: 0;
+  background: transparent;
+  color: rgba(35, 74, 59, 0.4);
+  font-size: 20px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+.wish-x:hover { color: var(--brick); }
+
+.wish-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  padding: 28px 24px 40px;
+}
+.wish-empty img {
+  width: 78px;
+  height: 78px;
+  border-radius: 50%;
+  object-fit: cover;
+  opacity: 0.85;
+  margin-bottom: 4px;
+}
+.wish-empty b { font-size: 16px; color: var(--railing); }
+.wish-empty span { font-size: 13px; color: rgba(35, 74, 59, 0.62); line-height: 1.5; max-width: 260px; }
+
+/* ---------- postcode to address, at signup ---------- */
+
+.pc-row { display: flex; gap: 8px; }
+.pc-row input { flex: 1; min-width: 0; }
+.pc-find {
+  flex: none;
+  border: 0;
+  border-radius: 12px;
+  background: var(--railing);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 0 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pc-find:disabled { opacity: 0.6; cursor: default; }
+
+.addr-picker {
+  margin-top: 10px;
+  padding: 12px;
+  background: var(--render);
+  border-radius: 14px;
+}
+.addr-lede { margin: 0 0 8px; font-size: 13px; color: var(--railing); }
+.addr-list { display: flex; flex-direction: column; gap: 6px; max-height: 190px; overflow-y: auto; }
+.addr-opt {
+  text-align: left;
+  border: 1px solid rgba(35, 74, 59, 0.14);
+  background: #fff;
+  border-radius: 10px;
+  padding: 9px 11px;
+  font-size: 13px;
+  color: var(--railing);
+  cursor: pointer;
+}
+.addr-opt:hover { border-color: var(--railing); background: #fff; }
+.addr-house { width: 100%; }
+
+.addr-done {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--railing);
+}
+.addr-done svg { color: #2E7D52; flex: none; }
+.addr-change {
+  border: 0;
+  background: transparent;
+  color: rgba(35, 74, 59, 0.6);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.addr-why { margin: 8px 0 0; font-size: 11.5px; line-height: 1.45; color: rgba(35, 74, 59, 0.55); }

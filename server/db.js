@@ -204,6 +204,23 @@ CREATE TABLE IF NOT EXISTS postcode_cache (
   lng      DOUBLE PRECISION NOT NULL
 );
 
+/* Who has already been told about which item. Kept apart from wish_hits so
+   that deleting a wish and adding it back doesn't replay alerts someone has
+   already read. */
+CREATE TABLE IF NOT EXISTS wish_told (
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_id BIGINT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  at      BIGINT NOT NULL,
+  PRIMARY KEY (user_id, item_id)
+);
+
+CREATE TABLE IF NOT EXISTS street_cache (
+  lat  DOUBLE PRECISION NOT NULL,
+  lng  DOUBLE PRECISION NOT NULL,
+  road TEXT NOT NULL,
+  PRIMARY KEY (lat, lng)
+);
+
 CREATE TABLE IF NOT EXISTS no_shows (
   id      BIGSERIAL PRIMARY KEY,
   user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -284,6 +301,8 @@ export async function initDb() {
     ALTER TABLE items ADD COLUMN IF NOT EXISTS portions INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS photo_ref TEXT;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS details TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS uprn TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS address_verified TEXT;
   `);
 }
 
@@ -578,6 +597,7 @@ async function seedActivity({ now, demoId, giverIds, listed, history }) {
     ["thanks", "from_id"],
   ];
   await query("DELETE FROM wish_hits WHERE wish_id IN (SELECT id FROM wishes WHERE user_id = $1)", [demoId]);
+  await query("DELETE FROM wish_told WHERE user_id = $1", [demoId]);
   for (const [table, col] of wipe) await query(`DELETE FROM ${table} WHERE ${col} = $1`, [demoId]);
 
   /* one item already claimed, so "To collect" has something in it and the

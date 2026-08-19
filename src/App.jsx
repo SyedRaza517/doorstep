@@ -297,6 +297,27 @@ const fieldsFor = (type, cat) => [...DETAIL_COMMON, ...(type === "food" ? DETAIL
 const catsFor = (type) => (type === "food" ? FOOD_CATS : NONFOOD_CATS);
 const kindFor = (type, cat) => (catsFor(type).find((c) => c.cat === cat) || {}).kind || "bookcase";
 const GIVE_CATEGORIES = NONFOOD_CATS.map((c) => c.cat);
+/* people wish for food too, so the wish list offers every category */
+const WISH_CATS = [...NONFOOD_CATS, ...FOOD_CATS];
+const picForCat = (cat) => (WISH_CATS.find((c) => c.cat === cat) || {}).pic || null;
+
+/* "1 miles" reads wrong. Say it the way a person would. */
+const milesLabel = (r) => {
+  if (r === 0.25) return "a quarter mile";
+  if (r === 0.5) return "half a mile";
+  if (r === 1) return "1 mile";
+  return `${r} miles`;
+};
+
+const addedOn = (ms) => {
+  if (!ms) return "";
+  const days = Math.floor((Date.now() - ms) / 86400000);
+  if (days <= 0) return "added today";
+  if (days === 1) return "added yesterday";
+  if (days < 7) return `added ${days} days ago`;
+  if (days < 14) return "added last week";
+  return `added ${Math.floor(days / 7)} weeks ago`;
+};
 
 const SPOT_OPTIONS = [
   { v: "doorstep", label: "Doorstep / front steps" },
@@ -386,6 +407,9 @@ export default function Doorstep() {
   const [authReason, setAuthReason] = useState(null);
   const [mode, setMode] = useState("signup");
   const [form, setForm] = useState({ name: "", email: "", postcode: "", password: "", confirm: "" });
+  /* what the postcode turned into: the street we found, the houses to pick
+     from if a licensed lookup is configured, and what they chose */
+  const [addr, setAddr] = useState({ state: "idle", road: null, options: [], picked: null, house: "" });
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("Going soonest");
@@ -706,6 +730,40 @@ export default function Doorstep() {
     setErrors((prev) => (prev[key] || prev._form ? { ...prev, [key]: null, _form: null } : prev));
   };
 
+  /* Postcode in, address out. There is no free source of UK house-level
+     addresses — Royal Mail's file is licensed — so without a provider key
+     this verifies the postcode, names the street, and lets someone add their
+     own house number. With a key it returns the real list to choose from. */
+  const findAddress = async () => {
+    const pc = form.postcode.trim();
+    if (!/^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i.test(pc)) {
+      setErrors((e) => ({ ...e, postcode: "Enter a full UK postcode, like E8 3EP" }));
+      return;
+    }
+    setAddr((a) => ({ ...a, state: "looking" }));
+    try {
+      const found = await api(`/address?postcode=${encodeURIComponent(pc)}`);
+      setErrors((e) => ({ ...e, postcode: null }));
+      setAddr({
+        state: found.mode === "list" ? "choose" : "street",
+        road: found.road || null,
+        options: found.addresses || [],
+        picked: null,
+        house: "",
+      });
+    } catch (e) {
+      setAddr({ state: "idle", road: null, options: [], picked: null, house: "" });
+      setErrors((prev) => ({ ...prev, postcode: e.message }));
+    }
+  };
+
+  /* the address as it will be stored and shown when they give something away */
+  const addressLine = () => {
+    if (addr.picked) return addr.picked.line;
+    if (addr.house.trim() && addr.road) return `${addr.house.trim()} ${addr.road}`;
+    return addr.house.trim();
+  };
+
   const submit = async () => {
     const next = {};
     const signup = mode === "signup";
@@ -731,7 +789,15 @@ export default function Doorstep() {
       const data = await api(signup ? "/auth/signup" : "/auth/signin", {
         method: "POST",
         body: signup
-          ? { name: form.name, email: form.email, postcode: form.postcode, password: form.password }
+          ? {
+              name: form.name,
+              email: form.email,
+              postcode: form.postcode,
+              password: form.password,
+              address: addressLine(),
+              road: (addr.picked && addr.picked.road) || addr.road || "",
+              uprn: (addr.picked && addr.picked.id) || null,
+            }
           : { email: form.email, password: form.password },
       });
       localStorage.setItem("ds_token", data.token);
@@ -992,6 +1058,157 @@ export default function Doorstep() {
     }
   };
 
+  /* One wish list, built once and shown in both places. It used to be two
+     hand-written copies that had already drifted apart — different wording,
+     an empty state on one and a blank void on the other. */
+  const wishReady = Boolean(newWish.keyword.trim()) || newWish.cat !== "Anything";
+
+  const wishPanel = (
+    <>
+      <p className="sub-lede">
+        Say what you're after. If it's already up we'll tell you now, and the moment a neighbour lists
+        one you'll know straight away.
+      </p>
+
+      <div className="wish-compose">
+        <div className="field">
+          <label htmlFor="al-word">I'm after</label>
+          <input
+            id="al-word"
+            value={newWish.keyword}
+            onChange={(e) => setNewWish((w) => ({ ...w, keyword: e.target.value }))}
+            placeholder="cot, desk, monstera, bread"
+            onKeyDown={(e) => e.key === "Enter" && wishReady && addWish()}
+          />
+        </div>
+
+        <div className="field">
+          <label>Category</label>
+          <div className="wish-cats" role="group" aria-label="Wish category">
+            {[{ cat: "Anything", pic: null }, ...WISH_CATS].map((c) => (
+              <button
+                key={c.cat}
+                className="wish-cat"
+                aria-pressed={newWish.cat === c.cat}
+                onClick={() => setNewWish((w) => ({ ...w, cat: c.cat }))}
+              >
+                <span className="wish-cat-art">
+                  {c.pic ? (
+                    <img src={`${API}/photos/${c.pic}`} alt="" loading="lazy" />
+                  ) : (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                      <path d="M5 12h14M12 5v14" />
+                    </svg>
+                  )}
+                </span>
+                <small>{c.cat}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="field">
+          <label htmlFor="al-radius">Within {milesLabel(newWish.radius)} of home</label>
+          <input
+            id="al-radius"
+            className="range"
+            type="range"
+            min="0.25"
+            max="10"
+            step="0.25"
+            value={newWish.radius}
+            onChange={(e) => setNewWish((w) => ({ ...w, radius: Number(e.target.value) }))}
+          />
+          <div className="range-ends">
+            <span>a quarter mile</span>
+            <span>10 miles</span>
+          </div>
+        </div>
+
+        <button className="primary-btn" onClick={() => addWish()} disabled={!wishReady}>
+          {wishReady ? "Add to my wish list" : "Type what you're after"}
+        </button>
+        <p className="field-hint">
+          {wishes.length >= 10
+            ? "Ten wishes is the limit — remove one to add another."
+            : `You can keep up to ten. ${10 - wishes.length} left.`}
+        </p>
+      </div>
+
+      {wishes.length === 0 ? (
+        <div className="wish-empty">
+          <img src={`${API}/photos/houseplant`} alt="" />
+          <b>Nothing on your wish list yet</b>
+          <span>
+            Tell us what you're after and we'll watch every listing for it — day or night, so you don't
+            have to keep checking.
+          </span>
+        </div>
+      ) : (
+        <>
+          <p className="sub-head">
+            You're waiting for {wishes.length === 1 ? "one thing" : `${wishes.length} things`}
+          </p>
+          <div className="wish-list">
+            {wishes.map((w) => {
+              const named = Boolean(w.keyword);
+              const pic = picForCat(w.cat);
+              return (
+                <div key={w.id} className="wish-card">
+                  <span className="wish-art">
+                    {pic ? (
+                      <img src={`${API}/photos/${pic}`} alt="" loading="lazy" />
+                    ) : (
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M12 20.5S3.5 15 3.5 9.2A4.2 4.2 0 0 1 12 7a4.2 4.2 0 0 1 8.5 2.2c0 5.8-8.5 11.3-8.5 11.3Z" />
+                      </svg>
+                    )}
+                  </span>
+
+                  <span className="wish-what">
+                    <b>{named ? w.keyword : `Anything in ${w.cat}`}</b>
+                    <small>
+                      {named && w.cat !== "Anything" ? `${w.cat} · ` : ""}
+                      within {milesLabel(w.radius)}
+                      {w.createdAt ? ` · ${addedOn(w.createdAt)}` : ""}
+                    </small>
+                  </span>
+
+                  <span className="wish-side">
+                    {w.upNow > 0 ? (
+                      <button
+                        className="wish-live"
+                        onClick={() => {
+                          /* take them straight to the things that match it */
+                          setQ(w.keyword || "");
+                          setFilter(w.cat === "Anything" ? "Going soonest" : w.cat);
+                          setRadius(w.radius);
+                          setCustomRadius(true);
+                          setScreen("home");
+                        }}
+                      >
+                        {w.upNow === 1 ? "1 up now" : `${w.upNow} up now`}
+                      </button>
+                    ) : (
+                      <span className="wish-watch">Watching</span>
+                    )}
+                    <button
+                      className="wish-x"
+                      aria-label={`Remove ${w.keyword || w.cat} from your wish list`}
+                      onClick={() => removeWish(w.id)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </>
+  );
+
   const addWish = async () => {
     try {
       const created = await api("/wishes", { method: "POST", token, body: newWish });
@@ -1235,8 +1452,80 @@ export default function Doorstep() {
               {signup && (
                 <div className={`field postcode ${errors.postcode ? "bad" : ""}`}>
                   <label htmlFor="ds-postcode">Postcode</label>
-                  <input id="ds-postcode" value={form.postcode} onChange={set("postcode")} onKeyDown={onKey} placeholder="E8 3EP" autoComplete="postal-code" />
+                  <div className="pc-row">
+                    <input
+                      id="ds-postcode"
+                      value={form.postcode}
+                      onChange={(e) => {
+                        set("postcode")(e);
+                        /* changing the postcode invalidates whatever was found for the old one */
+                        setAddr({ state: "idle", road: null, options: [], picked: null, house: "" });
+                      }}
+                      onKeyDown={(e) => e.key === "Enter" && findAddress()}
+                      placeholder="E8 3EP"
+                      autoComplete="postal-code"
+                    />
+                    <button className="pc-find" onClick={findAddress} disabled={addr.state === "looking"}>
+                      {addr.state === "looking" ? "Looking…" : "Find address"}
+                    </button>
+                  </div>
                   {errors.postcode && <p className="field-note">{errors.postcode}</p>}
+
+                  {/* a licensed lookup gave us the actual houses */}
+                  {addr.state === "choose" && !addr.picked && (
+                    <div className="addr-picker">
+                      <p className="addr-lede">Pick your address</p>
+                      <div className="addr-list">
+                        {addr.options.map((o) => (
+                          <button key={o.id} className="addr-opt" onClick={() => setAddr((a) => ({ ...a, picked: o }))}>
+                            {o.line}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* no licensed lookup: verified postcode, the street we found,
+                      and they add the bit only they can tell us */}
+                  {addr.state === "street" && (
+                    <div className="addr-picker">
+                      <p className="addr-lede">
+                        {addr.road ? (
+                          <>
+                            That's <b>{addr.road}</b>. Which number?
+                          </>
+                        ) : (
+                          "Postcode found. What's your house number or name?"
+                        )}
+                      </p>
+                      <input
+                        className="addr-house"
+                        value={addr.house}
+                        onChange={(e) => setAddr((a) => ({ ...a, house: e.target.value }))}
+                        placeholder="42, or Flat 3"
+                        autoComplete="address-line1"
+                      />
+                    </div>
+                  )}
+
+                  {(addr.picked || (addr.state === "street" && addr.house.trim())) && (
+                    <p className="addr-done">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                      {addressLine()}
+                      {addr.picked && (
+                        <button className="addr-change" onClick={() => setAddr((a) => ({ ...a, picked: null }))}>
+                          change
+                        </button>
+                      )}
+                    </p>
+                  )}
+
+                  <p className="addr-why">
+                    Only used to fill in your address when you give something away. Neighbours never see it
+                    until you've handed something over.
+                  </p>
                 </div>
               )}
 
@@ -1775,39 +2064,7 @@ export default function Doorstep() {
           </>
         )}
 
-        {tab === "wishes" && (
-          <>
-            <p className="sub-lede">
-              What you're waiting for. If it's already up we tell you straight away, and the moment a
-              neighbour lists one you'll know.
-            </p>
-            {wishes.length === 0 && (
-              <p className="empty">
-                Nothing on your wish list yet.
-                <br />
-                Add what you're after and we'll watch for it.
-              </p>
-            )}
-            {wishes.map((w) => (
-              <div key={w.id} className="alert-row">
-                <span>
-                  <b>{w.keyword || w.cat}</b>
-                  <small>
-                    {w.cat !== "Anything" && w.keyword ? `${w.cat} · ` : ""}
-                    within {w.radius === 0.5 ? "0.5 miles" : `${w.radius} miles`}
-                    {w.found > 0 ? ` · found ${w.found}` : ""}
-                  </small>
-                </span>
-                <button aria-label={`Remove ${w.keyword || w.cat} from your wish list`} onClick={() => removeWish(w.id)}>
-                  ×
-                </button>
-              </div>
-            ))}
-            <button className="ghost-btn" onClick={() => setScreen("wishes")}>
-              Add something to my wish list
-            </button>
-          </>
-        )}
+        {tab === "wishes" && wishPanel}
       </SubScreen>
     );
   }
@@ -1852,63 +2109,7 @@ export default function Doorstep() {
   if (screen === "wishes") {
     return (
       <SubScreen title="Wish list" time={timeNow} toast={toast} onBack={() => setScreen("home")}>
-        <p className="sub-lede">
-          Say what you're after. If it's already up we'll tell you now, and the moment a neighbour lists
-          one you'll know straight away. No posting a plea, no waiting for a reply.
-        </p>
-
-        <div className="field">
-          <label htmlFor="al-word">I'm after</label>
-          <input
-            id="al-word"
-            value={newWish.keyword}
-            onChange={(e) => setNewWish((w) => ({ ...w, keyword: e.target.value }))}
-            placeholder="cot, desk, monstera"
-          />
-        </div>
-
-        <div className="field">
-          <label>Category</label>
-          <div className="chips" role="group" aria-label="Wish category">
-            {["Anything", ...GIVE_CATEGORIES].map((c) => (
-              <button key={c} className="chip" aria-pressed={newWish.cat === c} onClick={() => setNewWish((w) => ({ ...w, cat: c }))}>
-                {c}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="field">
-          <label>Within</label>
-          <div className="chips" role="group" aria-label="Wish radius">
-            {[0.5, 1, 2, 5].map((r) => (
-              <button key={r} className="chip" aria-pressed={newWish.radius === r} onClick={() => setNewWish((w) => ({ ...w, radius: r }))}>
-                {r === 0.5 ? "0.5 miles" : `${r} miles`}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <button className="primary-btn" onClick={addWish}>
-          Add to my wish list
-        </button>
-
-        {wishes.length > 0 && <p className="sub-head">You're waiting for</p>}
-        {wishes.map((w) => (
-          <div key={w.id} className="alert-row">
-            <span>
-              <b>{w.keyword || w.cat}</b>
-              <small>
-                {w.cat !== "Anything" && w.keyword ? `${w.cat} · ` : ""}
-                within {w.radius === 0.5 ? "0.5 miles" : `${w.radius} miles`}
-                {w.found > 0 ? ` · found ${w.found}` : ""}
-              </small>
-            </span>
-            <button aria-label={`Remove ${w.keyword || w.cat} from your wish list`} onClick={() => removeWish(w.id)}>
-              ×
-            </button>
-          </div>
-        ))}
+        {wishPanel}
       </SubScreen>
     );
   }

@@ -590,16 +590,87 @@ test("a wisher is never told twice about the same item", async () => {
   const first = (await call("/notifications", { token: wisher })).body.notifications.filter((n) => n.title === "Billy bookcase").length;
   assert.equal(first, 1);
 
-  /* a second wish covering the same item must not re-notify for it */
+  /* a second wish that also covers it must not announce it all over again:
+     being told once is what the reader was promised */
   const second = await call("/wishes", { method: "POST", token: wisher, body: { keyword: "billy", cat: "Anything", radius: 2 } });
   assert.equal(second.status, 201);
   const total = (await call("/notifications", { token: wisher })).body.notifications.filter((n) => n.title === "Billy bookcase").length;
-  assert.equal(total, 2, "a different wish may match, but each wish tells you once");
+  assert.equal(total, 1, "one item, one alert, however many wishes match it");
+});
 
-  const again = await call("/wishes", { method: "POST", token: wisher, body: { keyword: "bookcase", cat: "Furniture", radius: 2 } });
-  const after = (await call("/notifications", { token: wisher })).body.notifications.filter((n) => n.title === "Billy bookcase").length;
-  assert.equal(after, 3);
-  assert.ok(again.status === 201);
+test("removing a wish and adding it back does not replay alerts", async () => {
+  const giver = await newNeighbour("Encore Giver");
+  const wisher = await newNeighbour("Encore Wisher");
+
+  const wish = await call("/wishes", { method: "POST", token: wisher, body: { keyword: "kettle", cat: "Anything", radius: 2 } });
+  await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Copper kettle", cat: "Electricals", road: "Test Road, E8", address: "63 Test Road, London E8 3EP" },
+  });
+  const before = (await call("/notifications", { token: wisher })).body.notifications.filter((n) => n.title === "Copper kettle").length;
+  assert.equal(before, 1);
+
+  await call(`/wishes/${wish.body.id}`, { method: "DELETE", token: wisher });
+  await call("/wishes", { method: "POST", token: wisher, body: { keyword: "kettle", cat: "Anything", radius: 2 } });
+
+  const after = (await call("/notifications", { token: wisher })).body.notifications.filter((n) => n.title === "Copper kettle").length;
+  assert.equal(after, 1, "they already read that one");
+});
+
+test("the same wish twice is refused, and wishes count what is up now", async () => {
+  const giver = await newNeighbour("Dup Giver");
+  const wisher = await newNeighbour("Dup Wisher");
+
+  await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Zephyrine bookstand", cat: "Furniture", road: "Test Road, E8", address: "64 Test Road, London E8 3EP" },
+  });
+
+  const first = await call("/wishes", { method: "POST", token: wisher, body: { keyword: "zephyrine", cat: "Anything", radius: 2 } });
+  assert.equal(first.status, 201);
+  assert.equal(first.body.upNow, 1, "one is up right now");
+  assert.ok(first.body.createdAt > 0, "the row knows when it was added");
+
+  const again = await call("/wishes", { method: "POST", token: wisher, body: { keyword: "ZEPHYRINE", cat: "Anything", radius: 2 } });
+  assert.equal(again.status, 409, "the same wish twice is a duplicate, whatever the casing");
+
+  const list = await call("/wishes", { token: wisher });
+  assert.equal(list.body.wishes.length, 1);
+  assert.equal(list.body.wishes[0].upNow, 1);
+});
+
+test("a postcode becomes an address someone can finish", async () => {
+  const found = await call("/address?postcode=E8 3EP");
+  assert.equal(found.status, 200);
+  assert.ok(["list", "street"].includes(found.body.mode));
+  assert.equal(found.body.postcode, "E8 3EP");
+  if (found.body.mode === "list") assert.ok(Array.isArray(found.body.addresses));
+
+  const nonsense = await call("/address?postcode=ZZ99 9ZZ");
+  assert.equal(nonsense.status, 404);
+
+  const malformed = await call("/address?postcode=hello");
+  assert.equal(malformed.status, 400);
+});
+
+test("an address chosen at signup is kept for giving", async () => {
+  const res = await call("/auth/signup", {
+    method: "POST",
+    body: {
+      name: "Addressed Neighbour",
+      email: `addr${Date.now()}@test.uk`,
+      postcode: "E8 3EP",
+      password: "doorstep123",
+      address: "12 Ellingfort Road",
+      road: "Ellingfort Road",
+    },
+  });
+  assert.equal(res.status, 201);
+  const me = await call("/me", { token: res.body.token });
+  assert.equal(me.body.user.address, "12 Ellingfort Road");
+  assert.equal(me.body.user.road, "Ellingfort Road");
 });
 
 test("your own listings never trigger your own wishes", async () => {
