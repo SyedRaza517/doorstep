@@ -76,6 +76,49 @@ const Glyph = ({ kind, size = 52 }) => {
         <rect x="21" y="17" width="9" height="3" rx="1.5" fill={y} />
       </>
     ),
+    bread: (
+      <>
+        <path d="M9 22c0-5 4-8 17-8s17 3 17 8v14a6 6 0 0 1-6 6H15a6 6 0 0 1-6-6z" fill="none" stroke={g} strokeWidth="2.5" />
+        <path d="M17 22v20M26 22v20M35 22v20" stroke={g} strokeWidth="2" />
+        <rect x="12" y="14" width="8" height="4" rx="2" fill={y} />
+      </>
+    ),
+    veg: (
+      <>
+        <path d="M26 44c-8 0-13-6-13-13 0-7 5-12 13-12s13 5 13 12c0 7-5 13-13 13z" fill="none" stroke={g} strokeWidth="2.5" />
+        <path d="M26 19c0-6 3-9 8-10-1 6-3 9-8 10z" fill={y} />
+        <path d="M26 19v25" stroke={g} strokeWidth="2" />
+      </>
+    ),
+    dairy: (
+      <>
+        <path d="M18 20h16v20a4 4 0 0 1-4 4H22a4 4 0 0 1-4-4z" fill="none" stroke={g} strokeWidth="2.5" />
+        <path d="M21 20v-6h10v6" fill="none" stroke={g} strokeWidth="2.5" />
+        <rect x="21" y="28" width="10" height="5" rx="1.5" fill={y} />
+      </>
+    ),
+    tin: (
+      <>
+        <rect x="15" y="14" width="22" height="28" rx="3" fill="none" stroke={g} strokeWidth="2.5" />
+        <path d="M15 22h22M15 34h22" stroke={g} strokeWidth="2" />
+        <rect x="20" y="25" width="12" height="6" rx="1.5" fill={y} />
+      </>
+    ),
+    meal: (
+      <>
+        <path d="M10 26h32c0 9-7 16-16 16s-16-7-16-16z" fill="none" stroke={g} strokeWidth="2.5" />
+        <path d="M8 26h36" stroke={g} strokeWidth="2.5" strokeLinecap="round" />
+        <path d="M20 20c0-4 3-6 6-6s6 2 6 6" fill="none" stroke={g} strokeWidth="2.5" />
+        <rect x="21" y="30" width="10" height="4" rx="2" fill={y} />
+      </>
+    ),
+    drink: (
+      <>
+        <path d="M17 14h18l-3 28a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4z" fill="none" stroke={g} strokeWidth="2.5" />
+        <path d="M18 25h16" stroke={g} strokeWidth="2" />
+        <rect x="20" y="30" width="12" height="6" rx="2" fill={y} />
+      </>
+    ),
     baby: (
       <>
         <path d="M12 26h28v10a6 6 0 0 1-6 6H18a6 6 0 0 1-6-6z" fill="none" stroke={g} strokeWidth="2.5" />
@@ -176,8 +219,25 @@ const SubScreen = ({ title, time, toast, sheets, onBack, children }) => (
 );
 
 const CATEGORIES = ["Going soonest", "Furniture", "Kids", "Garden", "Electricals"];
-const GIVE_CATEGORIES = ["Furniture", "Kids", "Garden", "Electricals"];
-const KIND_BY_CAT = { Furniture: "chairs", Kids: "toys", Garden: "garden", Electricals: "bookcase" };
+const NONFOOD_CATS = [
+  { cat: "Furniture", kind: "chairs" },
+  { cat: "Kids", kind: "toys" },
+  { cat: "Garden", kind: "garden" },
+  { cat: "Electricals", kind: "bookcase" },
+];
+
+const FOOD_CATS = [
+  { cat: "Bakery", kind: "bread" },
+  { cat: "Fruit & veg", kind: "veg" },
+  { cat: "Dairy", kind: "dairy" },
+  { cat: "Store cupboard", kind: "tin" },
+  { cat: "Ready meals", kind: "meal" },
+  { cat: "Drinks", kind: "drink" },
+];
+
+const catsFor = (type) => (type === "food" ? FOOD_CATS : NONFOOD_CATS);
+const kindFor = (type, cat) => (catsFor(type).find((c) => c.cat === cat) || {}).kind || "bookcase";
+const GIVE_CATEGORIES = NONFOOD_CATS.map((c) => c.cat);
 
 const SPOT_OPTIONS = [
   { v: "doorstep", label: "Doorstep / front steps" },
@@ -194,7 +254,29 @@ const RADII = [
   { v: Infinity, label: "All" },
 ];
 
-const EMPTY_GIVE = { title: "", note: "", cat: "Furniture", road: "", address: "", hours: 2, photos: [], spot: "doorstep", confirm: false };
+const EMPTY_GIVE = {
+  type: "nonfood",
+  title: "",
+  note: "",
+  cat: "Furniture",
+  road: "",
+  address: "",
+  hours: 2,
+  photos: [],
+  spot: "doorstep",
+  confirm: false,
+  useBy: "",
+  portions: 1,
+};
+
+/* how long until a use-by date, in words */
+function untilUseBy(ms) {
+  const days = Math.ceil((ms - Date.now()) / 86400000);
+  if (days <= 0) return "today";
+  if (days === 1) return "tomorrow";
+  if (days < 7) return `${days} days`;
+  return new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
 const MAX_PHOTOS = 5;
 
 const REPORT_REASONS = [
@@ -247,6 +329,7 @@ export default function Doorstep() {
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("Going soonest");
+  const [typeFilter, setTypeFilter] = useState("all");
   const [q, setQ] = useState("");
   const [sort, setSort] = useState("time");
   const [radius, setRadius] = useState(2);
@@ -842,6 +925,11 @@ export default function Doorstep() {
     if (!give.road.trim()) next.road = "Which road is it on?";
     if (!give.address.trim()) next.address = "Only whoever claims it will see this";
     if (!give.confirm) next.confirm = "This one's non-negotiable — pavement items risk a £1,000 fine";
+    if (give.type === "food") {
+      if (!give.useBy) next.useBy = "When does it need eating by?";
+      else if (new Date(`${give.useBy}T23:59:59`).getTime() <= Date.now())
+        next.useBy = "That date has passed — food past its use-by can't be passed on";
+    }
     setGiveErrors(next);
     if (Object.keys(next).length > 0) return;
 
@@ -854,7 +942,10 @@ export default function Doorstep() {
           title: give.title,
           note: give.note,
           cat: give.cat,
-          kind: KIND_BY_CAT[give.cat] || "bookcase",
+          type: give.type,
+          kind: kindFor(give.type, give.cat),
+          useBy: give.useBy ? new Date(`${give.useBy}T23:59:59`).getTime() : null,
+          portions: give.portions,
           road: give.road,
           address: give.address,
           windowMinutes: give.hours * 60,
@@ -908,10 +999,13 @@ export default function Doorstep() {
     .filter(inRadius)
     .filter(matchesSearch)
     .filter((it) => (savedOnly ? it.saved : true))
+    .filter((it) => (typeFilter === "all" ? true : (it.type || "nonfood") === typeFilter))
     .filter((it) => (filter === "Going soonest" ? true : it.cat === filter))
     .sort((a, b) => (sort === "near" && a.miles != null && b.miles != null ? a.miles - b.miles : a.expiresAt - b.expiresAt));
 
-  const liveCount = items.filter((it) => it.expiresAt > now && it.status !== "taken" && inRadius(it)).length;
+  /* the headline counts what is actually on screen, filters and all —
+     saying "13 things" above five cards is just wrong */
+  const liveCount = visible.filter((it) => it.status !== "taken").length;
 
   /* Sheets belong to no single screen: they are opened from the feed, the
      detail screen and Your things, so they render alongside every one of
@@ -1235,7 +1329,23 @@ export default function Doorstep() {
                     </svg>
                     {item.cat}
                   </span>
+                  {item.type === "food" && item.portions > 1 && (
+                    <span className="fact">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                        <path d="M4 12h16" />
+                        <path d="M12 4v16" />
+                      </svg>
+                      {item.portions} portions
+                    </span>
+                  )}
                 </div>
+
+                {item.type === "food" && item.useBy && (
+                  <p className="food-note">
+                    <b>Eat by {untilUseBy(item.useBy)}</b> — check it over when you collect. Food past its use-by
+                    date can't be passed on.
+                  </p>
+                )}
 
                 <p className="detail-where">
                   {item.spot === "buzz and collect"
@@ -2013,6 +2123,32 @@ export default function Doorstep() {
                 </div>
               )}
 
+              <div className="field">
+                <label>What are you passing on</label>
+                <div className="type-pills" role="group" aria-label="Food or not">
+                  {[
+                    { v: "nonfood", label: "Something" },
+                    { v: "food", label: "Food" },
+                  ].map((t) => (
+                    <button
+                      key={t.v}
+                      className="type-pill"
+                      aria-pressed={give.type === t.v}
+                      onClick={() =>
+                        setGive((g) => ({
+                          ...g,
+                          type: t.v,
+                          cat: catsFor(t.v)[0].cat,
+                          hours: t.v === "food" ? 4 : 2,
+                        }))
+                      }
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className={`field ${giveErrors.title ? "bad" : ""}`}>
                 <label htmlFor="gv-title">What is it</label>
                 <input id="gv-title" value={give.title} onChange={setG("title")} placeholder="Pine bookcase" />
@@ -2039,14 +2175,14 @@ export default function Doorstep() {
               <div className="field">
                 <label>Category</label>
                 <div className="chips" role="group" aria-label="Category">
-                  {GIVE_CATEGORIES.map((c) => (
+                  {catsFor(give.type).map((c) => (
                     <button
-                      key={c}
+                      key={c.cat}
                       className="chip"
-                      aria-pressed={give.cat === c}
-                      onClick={() => setGive((g) => ({ ...g, cat: c }))}
+                      aria-pressed={give.cat === c.cat}
+                      onClick={() => setGive((g) => ({ ...g, cat: c.cat }))}
                     >
-                      {c}
+                      {c.cat}
                     </button>
                   ))}
                 </div>
@@ -2073,6 +2209,45 @@ export default function Doorstep() {
                 </div>
               </div>
 
+              {give.type === "food" && (
+                <>
+                  <div className={`field ${giveErrors.useBy ? "bad" : ""}`}>
+                    <label htmlFor="gv-useby">Use by</label>
+                    <input
+                      id="gv-useby"
+                      type="date"
+                      value={give.useBy}
+                      min={new Date().toISOString().slice(0, 10)}
+                      onChange={setG("useBy")}
+                    />
+                    {giveErrors.useBy ? (
+                      <p className="field-note">{giveErrors.useBy}</p>
+                    ) : (
+                      <p className="safety-note">
+                        The date on the packet. Food past its use-by can't be passed on — that one is the law,
+                        not a preference.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="field">
+                    <label>How many portions</label>
+                    <div className="chips" role="group" aria-label="Portions">
+                      {[1, 2, 3, 4, 6, 8].map((n) => (
+                        <button
+                          key={n}
+                          className="chip"
+                          aria-pressed={give.portions === n}
+                          onClick={() => setGive((g) => ({ ...g, portions: n }))}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
               <div className={`field ${giveErrors.road ? "bad" : ""}`}>
                 <label htmlFor="gv-road">Road</label>
                 <input id="gv-road" value={give.road} onChange={setG("road")} placeholder="Ellingfort Road, E8" />
@@ -2088,10 +2263,17 @@ export default function Doorstep() {
               <div className="field">
                 <label>How long</label>
                 <div className="chips" role="group" aria-label="Listing window">
-                  {[
-                    { h: 2, label: "2 hours — easy carry" },
-                    { h: 4, label: "4 hours — needs a van" },
-                  ].map((w) => (
+                  {(give.type === "food"
+                    ? [
+                        { h: 2, label: "2 hours" },
+                        { h: 4, label: "4 hours" },
+                        { h: 8, label: "8 hours" },
+                      ]
+                    : [
+                        { h: 2, label: "2 hours — easy carry" },
+                        { h: 4, label: "4 hours — needs a van" },
+                      ]
+                  ).map((w) => (
                     <button
                       key={w.h}
                       className="chip"
@@ -2170,7 +2352,10 @@ export default function Doorstep() {
 
           <main className="feed">
             <h1 className="feed-head">
-              {liveCount} thing{liveCount === 1 ? "" : "s"} going near you
+              {liveCount}{" "}
+              {typeFilter === "food"
+                ? `thing${liveCount === 1 ? "" : "s"} to eat near you`
+                : `thing${liveCount === 1 ? "" : "s"} going near you`}
             </h1>
             <p className="feed-sub">Claim it, then collect from the doorstep.</p>
 
@@ -2192,13 +2377,32 @@ export default function Doorstep() {
               )}
             </div>
 
+            <div className="type-pills" role="group" aria-label="Food or not">
+              {[
+                { v: "all", label: "Everything" },
+                { v: "food", label: "Food" },
+                { v: "nonfood", label: "Non-food" },
+              ].map((t) => (
+                <button
+                  key={t.v}
+                  className="type-pill"
+                  aria-pressed={typeFilter === t.v}
+                  onClick={() => {
+                    setTypeFilter(t.v);
+                    setFilter("Going soonest");
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
             <div className="cat-row" role="group" aria-label="Browse by category">
               {[
                 { c: "Going soonest", kind: "clock", label: "All" },
-                { c: "Furniture", kind: "chairs", label: "Furniture" },
-                { c: "Kids", kind: "toys", label: "Kids" },
-                { c: "Garden", kind: "garden", label: "Garden" },
-                { c: "Electricals", kind: "bookcase", label: "Electricals" },
+                ...(typeFilter === "food" ? FOOD_CATS : typeFilter === "nonfood" ? NONFOOD_CATS : [...NONFOOD_CATS, ...FOOD_CATS])
+                  .slice(0, typeFilter === "all" ? 4 : 6)
+                  .map((c) => ({ c: c.cat, kind: c.kind, label: c.cat })),
               ].map((c) => (
                 <button
                   key={c.c}
@@ -2332,6 +2536,9 @@ export default function Doorstep() {
                           </button>
                         )}
                         <span className={`gcard-timer ${urgent ? "urgent" : ""}`}>{formatLeft(remaining)}</span>
+                        {item.type === "food" && !gone && !mine && !item.owner && (
+                          <span className="gcard-food">Food</span>
+                        )}
                         {(gone || mine || item.owner) && (
                           <span className="gcard-state">{mine ? "Yours" : item.owner ? "Your listing" : "Claimed"}</span>
                         )}
@@ -2339,6 +2546,9 @@ export default function Doorstep() {
                       <div className="gcard-copy">
                         <b>{item.title}</b>
                         <span>{item.owner ? "Your doorstep" : [item.dist, item.road].filter(Boolean).join(" · ")}</span>
+                        {item.type === "food" && item.useBy && (
+                          <span className="useby">Eat by {untilUseBy(item.useBy)}</span>
+                        )}
                       </div>
                     </article>
                   );

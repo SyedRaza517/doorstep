@@ -701,3 +701,102 @@ test("a saved address prefills the next listing", async () => {
   const bad = await call("/me", { method: "PATCH", token, body: { spot: "the pavement" } });
   assert.equal(bad.status, 400, "the pavement is never an option");
 });
+
+test("food needs a use-by date, and one that has not passed", async () => {
+  const token = await newNeighbour("Food Giver");
+  const base = { cat: "Bakery", type: "food", road: "Test Road, E8", address: "80 Test Road, London E8 3EP" };
+
+  const noDate = await call("/items", { method: "POST", token, body: { ...base, title: "Two loaves" } });
+  assert.equal(noDate.status, 400);
+  assert.equal(noDate.body.field, "useBy");
+
+  const past = await call("/items", {
+    method: "POST",
+    token,
+    body: { ...base, title: "Two loaves", useBy: Date.now() - 86400000 },
+  });
+  assert.equal(past.status, 400, "food past its use-by must be refused");
+
+  const ok = await call("/items", {
+    method: "POST",
+    token,
+    body: { ...base, title: "Two loaves", useBy: Date.now() + 2 * 86400000, portions: 2 },
+  });
+  assert.equal(ok.status, 201);
+  assert.equal(ok.body.type, "food");
+  assert.equal(ok.body.portions, 2);
+  assert.ok(ok.body.useBy > Date.now());
+});
+
+test("a food listing never outlives its use-by date", async () => {
+  const token = await newNeighbour("Late Baker");
+  const useBy = Date.now() + 60 * 60 * 1000; /* an hour from now */
+  const made = await call("/items", {
+    method: "POST",
+    token,
+    body: {
+      title: "Sandwiches",
+      cat: "Ready meals",
+      type: "food",
+      useBy,
+      windowMinutes: 480,
+      road: "Test Road, E8",
+      address: "81 Test Road, London E8 3EP",
+    },
+  });
+  assert.equal(made.status, 201);
+  assert.ok(made.body.expiresAt <= useBy, "the window must close by the use-by date");
+});
+
+test("high-risk food is refused outright", async () => {
+  const token = await newNeighbour("Risky Cook");
+  for (const title of ["Raw chicken thighs", "Leftover cooked rice", "Unpasteurised cheese", "Baby formula tub"]) {
+    const res = await call("/items", {
+      method: "POST",
+      token,
+      body: { title, cat: "Ready meals", type: "food", useBy: Date.now() + 86400000, road: "Test Road, E8", address: "82 Test Road, London E8 3EP" },
+    });
+    assert.equal(res.status, 400, `${title} should be refused`);
+  }
+});
+
+test("categories belong to their type", async () => {
+  const token = await newNeighbour("Muddled Giver");
+  const wrong = await call("/items", {
+    method: "POST",
+    token,
+    body: { title: "Bread", cat: "Furniture", type: "food", useBy: Date.now() + 86400000, road: "Test Road, E8", address: "83 Test Road, London E8 3EP" },
+  });
+  assert.equal(wrong.status, 400);
+  assert.equal(wrong.body.field, "cat");
+
+  const alsoWrong = await call("/items", {
+    method: "POST",
+    token,
+    body: { title: "Chair", cat: "Bakery", road: "Test Road, E8", address: "83 Test Road, London E8 3EP" },
+  });
+  assert.equal(alsoWrong.status, 400);
+});
+
+test("the feed carries both kinds, and the seed has food in it", async () => {
+  const token = await signIn("demo@doorstep.uk", "doorstep123");
+  const { body } = await call("/items", { token });
+  const food = body.items.filter((i) => i.type === "food");
+  const nonfood = body.items.filter((i) => i.type === "nonfood");
+  assert.ok(food.length >= 3, `expected seeded food, saw ${food.length}`);
+  assert.ok(nonfood.length >= 5, `expected seeded non-food, saw ${nonfood.length}`);
+  for (const f of food) {
+    assert.ok(f.useBy > Date.now(), `${f.title} should not be past its use-by`);
+    assert.ok(FOODCATS.includes(f.cat), `${f.cat} is not a food category`);
+  }
+});
+
+const FOODCATS = ["Bakery", "Fruit & veg", "Dairy", "Store cupboard", "Ready meals", "Drinks"];
+
+test("the category list is published for both types", async () => {
+  const res = await call("/categories");
+  assert.equal(res.status, 200);
+  assert.equal(res.body.food.length, 6);
+  assert.equal(res.body.nonfood.length, 4);
+  assert.ok(res.body.food.every((c) => c.cat && c.kind));
+});

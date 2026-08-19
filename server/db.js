@@ -159,7 +159,10 @@ CREATE TABLE IF NOT EXISTS items (
   lng              DOUBLE PRECISION,
   spot             TEXT NOT NULL DEFAULT 'doorstep',
   collected_at     BIGINT,
-  hidden_at        BIGINT
+  hidden_at        BIGINT,
+  type             TEXT NOT NULL DEFAULT 'nonfood',
+  use_by           BIGINT,
+  portions         INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE INDEX IF NOT EXISTS idx_items_expires ON items(expires_at);
@@ -245,6 +248,12 @@ CREATE TABLE IF NOT EXISTS reports (
 export async function initDb() {
   await connect();
   await exec(SCHEMA);
+  /* additive migrations, so an existing database picks up food support */
+  await exec(`
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'nonfood';
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS use_by BIGINT;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS portions INTEGER NOT NULL DEFAULT 1;
+  `);
 }
 
 export function hashPassword(password) {
@@ -301,6 +310,16 @@ const SEED_HISTORY = [
   { title: "Desk lamp", cat: "Electricals", kind: "bookcase", road: "Sandringham Road, E8", postcode: "E8 2LR", daysAgo: 9 },
   { title: "Bookshelf", cat: "Furniture", kind: "bookcase", road: "Parkholme Road, E8", postcode: "E8 3AG", daysAgo: 5 },
   { title: "Scooter", cat: "Kids", kind: "bike", road: "Barbauld Road, N16", postcode: "N16 0SS", daysAgo: 2 },
+];
+
+/* Food moves faster and lives shorter, so the demo reflects that: short
+   windows, portions, and a use-by date on everything. */
+const SEED_FOOD = [
+  { giver: 0, title: "Sourdough loaves x2", note: "Baked this morning at the bakery on the corner, more than we can eat.", cat: "Bakery", kind: "bread", road: "Ellingfort Road, E8", postcode: "E8 3PA", lat: 51.54248, lng: -0.05646, address: "14 Ellingfort Road, London E8 3PA", left: 95, spot: "doorstep", portions: 2, useByDays: 1 },
+  { giver: 1, title: "Veg box, half unused", note: "Carrots, leeks, two peppers and a squash. All firm.", cat: "Fruit & veg", kind: "veg", road: "Navarino Road, E8", postcode: "E8 1AD", lat: 51.54473, lng: -0.06193, address: "27 Navarino Road, London E8 1AD", left: 140, spot: "porch", portions: 4, useByDays: 3 },
+  { giver: 2, title: "Six eggs and a butter", note: "Bought too much before going away. Unopened.", cat: "Dairy", kind: "dairy", road: "Gayhurst Road, E8", postcode: "E8 3EN", lat: 51.54237, lng: -0.06258, address: "52 Gayhurst Road, London E8 3EN", left: 62, spot: "doorstep", portions: 6, useByDays: 5 },
+  { giver: 0, title: "Tins: chickpeas, tomatoes", note: "Four tins, all in date, from a shop we no longer use.", cat: "Store cupboard", kind: "tin", road: "Sandringham Road, E8", postcode: "E8 2LR", lat: 51.54993, lng: -0.07267, address: "89 Sandringham Road, London E8 2LR", left: 175, spot: "front garden", portions: 4, useByDays: 200 },
+  { giver: 1, title: "Two cartons of oat milk", note: "Unopened, we switched brands.", cat: "Drinks", kind: "drink", road: "Parkholme Road, E8", postcode: "E8 3AG", lat: 51.54462, lng: -0.06863, address: "34 Parkholme Road, London E8 3AG", left: 45, spot: "porch", portions: 2, useByDays: 9 },
 ];
 
 export async function refreshSeed() {
@@ -363,6 +382,21 @@ export async function refreshSeed() {
       ]
     );
     listed[it.title] = Number(row.id);
+  }
+
+  for (const f of SEED_FOOD) {
+    const shots = SEED_PHOTOS[f.title] || [];
+    await query(
+      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, postcode, lat, lng, spot, photo, photos, type, use_by, portions)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,'food',$17,$18)`,
+      [
+        giverIds[f.giver], f.title, f.note, f.cat, f.kind, f.road, f.address,
+        f.left * 60 * 1000, now + f.left * 60 * 1000, now, f.postcode, f.lat, f.lng, f.spot,
+        shots[0] || null, JSON.stringify(shots),
+        now + f.useByDays * 24 * 60 * 60 * 1000,
+        f.portions,
+      ]
+    );
   }
 
   /* collected history, owned by the seed givers and taken by the demo user */

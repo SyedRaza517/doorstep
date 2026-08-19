@@ -33,6 +33,41 @@ const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
 const SPOTS = ["doorstep", "front garden", "porch", "building lobby", "buzz and collect"];
 
+/* Two kinds of listing, because food carries obligations that a bookcase
+   does not: a use-by date is a legal line, not a nicety. */
+const TYPES = ["food", "nonfood"];
+const NONFOOD_CATS = ["Furniture", "Kids", "Garden", "Electricals"];
+const FOOD_CATS = ["Bakery", "Fruit & veg", "Dairy", "Store cupboard", "Ready meals", "Drinks"];
+
+/* Food that cannot be passed between households safely. Raw meat and fish,
+   unpasteurised dairy and reheated rice are the standard high-risk list;
+   baby formula is regulated separately and is not ours to redistribute. */
+const UNSAFE_FOOD_RE = new RegExp(
+  [
+    "raw meat", "raw chicken", "raw beef", "raw pork", "raw fish", "raw egg",
+    "unpasteuris", "unpasteuriz", "raw milk",
+    "reheated rice", "cooked rice",
+    "baby formula", "infant formula", "follow-on milk",
+    "home-?made preserve", "home-?canned",
+  ].join("|"),
+  "i"
+);
+
+/* A use-by date is the hard line: past it, food is not legal to pass on.
+   Best-before is quality, not safety, so it is not enforced here. */
+const FOOD_MAX_WINDOW_MIN = 8 * 60;
+
+/* which drawn glyph stands in when a listing has no photograph */
+const FOOD_KIND = {
+  Bakery: "bread",
+  "Fruit & veg": "veg",
+  Dairy: "dairy",
+  "Store cupboard": "tin",
+  "Ready meals": "meal",
+  Drinks: "drink",
+};
+const NONFOOD_KIND = { Furniture: "chairs", Kids: "toys", Garden: "garden", Electricals: "bookcase" };
+
 /* Modelled on Olio's published banned list plus UK second-hand safety
    guidance: car seats and infant mattresses carry invisible risk, and the
    rest are age-restricted, dangerous, or not the giver's to give. */
@@ -93,6 +128,8 @@ const castItem = (it) =>
     created_at: num(it.created_at),
     collected_at: num(it.collected_at),
     hidden_at: num(it.hidden_at),
+    use_by: num(it.use_by),
+    portions: num(it.portions),
   };
 
 const castUser = (u) => u && { ...u, id: num(u.id), created_at: num(u.created_at) };
@@ -318,6 +355,9 @@ function publicItem(it, user, now, ctx) {
     note: it.note,
     cat: it.cat,
     kind: it.kind,
+    type: it.type || "nonfood",
+    useBy: num(it.use_by),
+    portions: num(it.portions) || 1,
     dist: miles != null ? formatMiles(miles) : it.dist,
     miles,
     road: it.road,
@@ -566,12 +606,34 @@ app.post(
       photo = null,
       photos = null,
       spot = "doorstep",
+      type = "nonfood",
+      useBy = null,
+      portions = 1,
     } = req.body || {};
     if (!title.trim()) return fail(res, 400, "Give the item a name", "title");
     if (!address.trim()) return fail(res, 400, "We need the address the claimer will collect from", "address");
     const shots = validPhotos(photos != null ? photos : photo);
     if (!shots.ok) return fail(res, 400, shots.error, "photo");
     if (!SPOTS.includes(spot)) return fail(res, 400, "Pick where the item will be waiting", "spot");
+    if (!TYPES.includes(type)) return fail(res, 400, "Is it food or not?", "type");
+
+    const cats = type === "food" ? FOOD_CATS : NONFOOD_CATS;
+    if (!cats.includes(cat)) return fail(res, 400, "Pick a category", "cat");
+
+    let useByAt = null;
+    if (type === "food") {
+      if (UNSAFE_FOOD_RE.test(`${title} ${note}`))
+        return fail(
+          res,
+          400,
+          "That one isn't safe to pass between households — raw meat and fish, unpasteurised dairy, cooked rice and baby formula can't be listed",
+          "title"
+        );
+      useByAt = Number(useBy);
+      if (!useByAt || Number.isNaN(useByAt)) return fail(res, 400, "When does it need eating by?", "useBy");
+      if (useByAt <= Date.now()) return fail(res, 400, "That date has already passed — food past its use-by can't be passed on", "useBy");
+    }
+
     if (BANNED_RE.test(`${title} ${note}`))
       return fail(
         res,
@@ -581,11 +643,16 @@ app.post(
       );
 
     const now = Date.now();
-    const windowMs = Math.max(15, Math.min(24 * 60, Number(windowMinutes) || DEFAULT_WINDOW_MIN)) * 60 * 1000;
+    const capMin = type === "food" ? FOOD_MAX_WINDOW_MIN : 24 * 60;
+    let windowMs = Math.max(15, Math.min(capMin, Number(windowMinutes) || DEFAULT_WINDOW_MIN)) * 60 * 1000;
+    /* a listing must never outlive the food it describes */
+    if (type === "food" && now + windowMs > useByAt) windowMs = Math.max(15 * 60 * 1000, useByAt - now);
+    const servings = Math.max(1, Math.min(20, Number(portions) || 1));
+
     /* the item sits on the giver's own property, so it inherits their coordinates */
     const row = await one(
-      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, photo, photos, spot, postcode, lat, lng)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, photo, photos, spot, postcode, lat, lng, type, use_by, portions)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
       [
         req.user.id,
         title.trim(),
@@ -603,6 +670,9 @@ app.post(
         req.user.postcode,
         req.user.lat,
         req.user.lng,
+        type,
+        useByAt,
+        servings,
       ]
     );
 
@@ -702,6 +772,13 @@ app.post(
     res.json({ ok: true, hidden });
   })
 );
+
+app.get("/api/categories", (req, res) => {
+  res.json({
+    food: FOOD_CATS.map((c) => ({ cat: c, kind: FOOD_KIND[c] || "meal" })),
+    nonfood: NONFOOD_CATS.map((c) => ({ cat: c, kind: NONFOOD_KIND[c] || "bookcase" })),
+  });
+});
 
 app.get("/api/report-reasons", auth, (req, res) => {
   res.json({

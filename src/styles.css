@@ -1714,8 +1714,8 @@
 
 .cat-row {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(58px, 1fr));
+  gap: 6px 4px;
   margin-bottom: 16px;
 }
 
@@ -1738,7 +1738,7 @@
 .cat-btn span.cat-ring {
   width: 100%;
   aspect-ratio: 1;
-  max-width: 58px;
+  max-width: 54px;
   border-radius: 50%;
   background: var(--card);
   border: 1px solid var(--rule);
@@ -1935,3 +1935,90 @@
 .also { margin-top: 26px; }
 .also .sub-head { margin-top: 0; }
 .also .gcard-copy b { font-size: 13.5px; }
+
+
+/* ---------- food or not ---------- */
+
+.type-pills {
+  display: flex;
+  gap: 7px;
+  margin-bottom: 14px;
+}
+
+.type-pill {
+  flex: 1;
+  font-family: var(--body);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--railing);
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 22px;
+  padding: 9px 8px;
+  cursor: pointer;
+  transition: background .14s, color .14s, border-color .14s;
+}
+
+.type-pill:hover { border-color: var(--railing); }
+
+.type-pill[aria-pressed="true"] {
+  background: var(--railing);
+  border-color: var(--railing);
+  color: #FFF;
+  box-shadow: 0 2px 8px rgba(35, 74, 59, 0.2);
+}
+
+/* a food listing wears its use-by date, because that is the thing that
+   matters most about it */
+.useby {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--body);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--brick);
+  background: #F7EFE9;
+  border-radius: 20px;
+  padding: 3px 9px;
+}
+
+.gcard-food {
+  position: absolute;
+  left: 7px;
+  top: 7px;
+  font-family: var(--body);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--signal);
+  border-radius: 20px;
+  padding: 3px 8px;
+}
+
+.food-note {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: #F7EFE9;
+  border-radius: 10px;
+  padding: 10px 13px;
+  margin: 0 0 14px;
+}
+
+.food-note b { color: var(--brick); }
+
+.gcard-copy .useby { align-self: flex-start; margin-top: 2px; }
+
+.give-form input[type="date"] {
+  width: 100%;
+  font-family: var(--body);
+  font-size: 16px;
+  color: var(--ink);
+  padding: 13px 14px;
+  background: var(--card);
+  border: 1.5px solid var(--rule);
+  border-radius: 10px;
+}
