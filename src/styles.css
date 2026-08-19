@@ -259,7 +259,7 @@
 .topbar .wordmark { font-size: 20px; color: #FFF; gap: 7px; }
 .topbar .wordmark-dot { width: 9px; height: 9px; margin-top: 2px; }
 
-.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.topbar-actions { display: flex; align-items: center; gap: 7px; min-width: 0; }
 
 .icon-btn {
   width: 30px;
@@ -287,6 +287,8 @@
   border-radius: 20px;
   padding: 6px 12px;
   cursor: pointer;
+  white-space: nowrap; /* "Sign in" was breaking across two lines */
+  flex: none;
 }
 
 .feed { flex: 1; padding: 22px 20px 110px; }
