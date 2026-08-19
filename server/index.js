@@ -1884,6 +1884,100 @@ app.post(
   })
 );
 
+/* ---- one trip: bundling ----
+   Vinted's bundle idea, translated to doorsteps: when the giver has more
+   than one thing out and a neighbour is already on their way, the rest can
+   join the same walk. One walk, one doorstep, one conversation — the giver
+   is spared a second arrangement and the street a second trip. */
+
+/* Four things is a full pair of hands and a bag. Any more and "one trip"
+   quietly becomes a house clearance, which is a different favour entirely. */
+const BUNDLE_MAX = 4;
+
+app.post(
+  "/api/items/:id/bundle",
+  auth,
+  wrap(async (req, res) => {
+    const now = Date.now();
+    await sweepLapsedClaims(now);
+
+    const requested = [...new Set((Array.isArray((req.body || {}).itemIds) ? (req.body || {}).itemIds : []).map(Number))];
+    if (!requested.length || requested.some((n) => !Number.isFinite(n) || n <= 0))
+      return fail(res, 400, "Say which items to add to the trip");
+
+    const outcome = await tx(async (q) => {
+      /* The anchor is the claim the caller already holds. It is locked first,
+         in the same FOR UPDATE pattern as claiming, so a lapsing hold and a
+         bundle cannot cross in mid-air. */
+      const [anchorRaw] = await q("SELECT * FROM items WHERE id = $1 FOR UPDATE", [req.params.id]);
+      const anchor = castItem(anchorRaw);
+      if (!anchor) return { status: 404, error: "That item doesn't exist" };
+      if (anchor.claimed_by !== req.user.id || anchor.claim_expires_at == null || anchor.claim_expires_at <= now || anchor.collected_at != null)
+        return { status: 403, error: "A trip starts with a claim — claim something of theirs first" };
+
+      /* Deliberately no MAX_ACTIVE_CLAIMS or CLAIMS_PER_28_DAYS check here.
+         Those caps exist to stop one person hoovering up the whole
+         neighbourhood; a bundle is more things from one giver, collected in
+         one walk to one doorstep, which is the opposite of hoarding — it
+         removes journeys rather than multiplying them, so the anti-hoarding
+         arithmetic should never talk anyone out of it. */
+
+      /* the trip so far: everything already held from this doorstep on the
+         same clock, the anchor included */
+      const [{ n: tripSize }] = await q(
+        "SELECT COUNT(*) AS n FROM items WHERE claimed_by = $1 AND owner_id = $2 AND collected_at IS NULL AND claim_expires_at = $3",
+        [req.user.id, anchor.owner_id, anchor.claim_expires_at]
+      );
+      if (num(tripSize) + requested.length > BUNDLE_MAX)
+        return { status: 400, error: `A trip carries ${BUNDLE_MAX} things at most — that's already a full pair of hands` };
+
+      const added = [];
+      for (const id of requested) {
+        if (id === anchor.id) return { status: 400, error: "That one already is the trip" };
+        const [raw] = await q("SELECT * FROM items WHERE id = $1 FOR UPDATE", [id]);
+        const it = castItem(raw);
+        if (!it) return { status: 404, error: "One of those items doesn't exist" };
+        if (it.owner_id !== anchor.owner_id)
+          return { status: 400, error: "That one's on a different doorstep — it can't join this trip" };
+        if (it.wanted) return { status: 400, error: "That's something they're after, not something waiting" };
+        if (it.hidden_at != null) return { status: 410, error: "That listing is under review" };
+        if (it.collected_at != null || it.expires_at <= now)
+          return { status: 410, error: "Too late for that one — its window has closed" };
+        if (it.claimed_by != null && it.claim_expires_at > now)
+          return { status: 409, error: "Someone beat you to that one" };
+
+        /* the addition inherits the anchor's clock rather than starting its
+           own, so the whole trip is one hold that lapses together */
+        const [updated] = await q("UPDATE items SET claimed_by = $1, claim_expires_at = $2 WHERE id = $3 RETURNING *", [
+          req.user.id,
+          anchor.claim_expires_at,
+          it.id,
+        ]);
+        added.push(castItem(updated));
+      }
+      return { anchor, added };
+    });
+
+    if (outcome.error) return fail(res, outcome.status, outcome.error);
+
+    /* No new conversations: the trip already has one, opened by the anchor
+       claim. Each addition is noted there instead, so the giver knows what
+       to put out without a second thread appearing for the same knock. */
+    const conv = await one("SELECT id FROM conversations WHERE item_id = $1 AND claimer_id = $2", [
+      outcome.anchor.id,
+      req.user.id,
+    ]);
+    if (conv) {
+      for (const it of outcome.added) await threadNote(num(conv.id), `Also picking up: ${it.title}.`, now);
+      await pushMessage(num(conv.id), req.user.id, `Also picking up: ${outcome.added.map((i) => i.title).join(", ")}`, now);
+    }
+
+    const items = [];
+    for (const it of outcome.added) items.push(await publicOne(it, req.user, now));
+    res.json({ items });
+  })
+);
+
 /* the giver sees who is asking — first name, area, distance, record */
 app.get(
   "/api/items/:id/hands",

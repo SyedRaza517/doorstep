@@ -3658,3 +3658,56 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
   background: var(--railing);
   color: var(--signal);
 }
+
+/* ---------- one trip ----------
+   The bundle panel on the detail page: while a hold is yours, the same
+   giver's other live listings appear as compact rows, each with an Add pill,
+   so a second thing joins the walk without a second arrangement. */
+.trip-panel {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  padding: 13px 14px;
+  margin-top: 12px;
+}
+.trip-panel .sub-head { margin: 0 0 3px; }
+.trip-blurb { font-size: 12.5px; color: var(--hush); margin: 0 0 6px; }
+.trip-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 0;
+}
+.trip-row + .trip-row { border-top: 1px solid var(--rule); }
+.trip-thumb {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--render);
+}
+.trip-thumb-glyph { display: flex; align-items: center; justify-content: center; }
+.trip-copy { flex: 1; min-width: 0; }
+.trip-copy b {
+  display: block;
+  font-size: 13.5px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trip-copy small { font-size: 11.5px; color: var(--hush); }
+.trip-add {
+  flex: none;
+  border: none;
+  border-radius: 999px;
+  background: var(--railing);
+  color: #fff;
+  font-family: var(--body);
+  font-weight: 700;
+  font-size: 12.5px;
+  padding: 8px 18px;
+  cursor: pointer;
+}
+.trip-add:active { transform: scale(0.96); }

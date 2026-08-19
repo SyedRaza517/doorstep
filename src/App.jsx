@@ -1115,6 +1115,22 @@ export default function Doorstep() {
     }
   };
 
+  /* One trip: the claim is already held, so adding another of the same
+     giver's listings joins the walk rather than starting a new arrangement.
+     The server returns the freshly claimed items, which replace their stale
+     twins in the feed so the row disappears from the panel on its own. */
+  const bundle = async (anchor, extra) => {
+    try {
+      const d = await api(`/items/${anchor.id}/bundle`, { method: "POST", token, body: { itemIds: [extra.id] } });
+      const updated = new Map((d.items || []).map((i) => [i.id, i]));
+      setItems((list) => list.map((i) => (updated.has(i.id) ? updated.get(i.id) : i)));
+      setToast("Added to the trip — same doorstep, same half hour.");
+    } catch (e) {
+      setToast(e.message);
+      if (e.status === 409 || e.status === 410) refresh();
+    }
+  };
+
   const collected = async (item) => {
     try {
       await api(`/items/${item.id}/collected`, { method: "POST", token });
@@ -2311,6 +2327,45 @@ export default function Doorstep() {
                     </p>
                   </div>
                 )}
+
+                {/* One trip: while the hold is yours, anything else live on the
+                    same doorstep can join the walk — one knock instead of two. */}
+                {mine &&
+                  (() => {
+                    const more = items
+                      .filter(
+                        (i) =>
+                          i.giver && item.giver && i.giver.id === item.giver.id && i.status === "live" && !i.owner && !i.wanted && i.id !== item.id
+                      )
+                      .slice(0, 3);
+                    if (!more.length) return null;
+                    return (
+                      <div className="trip-panel">
+                        <p className="sub-head">Make it one trip</p>
+                        <p className="trip-blurb">
+                          {item.giver.name} has more waiting on the same doorstep — add it to this walk.
+                        </p>
+                        {more.map((i) => (
+                          <div className="trip-row" key={i.id}>
+                            {pictureOf(i) ? (
+                              <img className="trip-thumb" src={pictureOf(i)} alt="" />
+                            ) : (
+                              <span className="trip-thumb trip-thumb-glyph" aria-hidden="true">
+                                <Glyph kind={i.kind} size={28} />
+                              </span>
+                            )}
+                            <span className="trip-copy">
+                              <b>{i.title}</b>
+                              <small>{i.cat}</small>
+                            </span>
+                            <button className="trip-add" onClick={() => bundle(item, i)}>
+                              Add
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
 
                 {item.owner && !item.wanted && item.status !== "taken" && (
                   <button

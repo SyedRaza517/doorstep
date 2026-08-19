@@ -1344,3 +1344,51 @@ test("following a giver rings the bell for their next listing, and only while fo
     "no second bell after unfollowing"
   );
 });
+
+test("one trip: a bundle joins the anchor's hold, refuses other doorsteps and strangers", async () => {
+  const giver = await newNeighbour("Bundle Giver");
+  const otherGiver = await newNeighbour("Other Doorstep");
+  const taker = await newNeighbour("Trip Taker");
+  const stranger = await newNeighbour("Bundle Stranger");
+
+  const list = (token, title, address) =>
+    call("/items", { method: "POST", token, body: { title, cat: "Furniture", road: "Test Road, E8", address } });
+  const anchor = await list(giver, "Trip bookcase", "90 Test Road, London E8 3EP");
+  const table = await list(giver, "Trip side table", "90 Test Road, London E8 3EP");
+  const mirror = await list(giver, "Trip mirror", "90 Test Road, London E8 3EP");
+  const elsewhere = await list(otherGiver, "Trip impostor lamp", "91 Test Road, London E8 3EP");
+
+  /* nobody holds the anchor yet, so there is no trip to join */
+  const noClaim = await call(`/items/${anchor.body.id}/bundle`, { method: "POST", token: stranger, body: { itemIds: [table.body.id] } });
+  assert.equal(noClaim.status, 403);
+
+  const claimed = await call(`/items/${anchor.body.id}/claim`, { method: "POST", token: taker });
+  assert.equal(claimed.status, 200);
+  const hold = claimed.body.claimExpiresAt;
+  assert.ok(hold > Date.now());
+
+  /* holding the anchor is the ticket — a stranger without it is turned away */
+  const cheeky = await call(`/items/${anchor.body.id}/bundle`, { method: "POST", token: stranger, body: { itemIds: [table.body.id] } });
+  assert.equal(cheeky.status, 403);
+
+  /* a different giver is a different doorstep, so it cannot join this walk */
+  const wrongDoor = await call(`/items/${anchor.body.id}/bundle`, { method: "POST", token: taker, body: { itemIds: [elsewhere.body.id] } });
+  assert.equal(wrongDoor.status, 400);
+  assert.match(wrongDoor.body.error, /different doorstep/i);
+
+  /* both of the giver's other listings join in one call, on the anchor's clock */
+  const bundled = await call(`/items/${anchor.body.id}/bundle`, { method: "POST", token: taker, body: { itemIds: [table.body.id, mirror.body.id] } });
+  assert.equal(bundled.status, 200);
+  assert.equal(bundled.body.items.length, 2);
+  for (const it of bundled.body.items) {
+    assert.equal(it.status, "yours");
+    assert.equal(it.claimExpiresAt, hold, "the whole trip lapses together");
+  }
+
+  /* no new threads: the anchor's conversation carries a note per addition */
+  const chat = await call(`/chats/${claimed.body.conversationId}`, { token: taker });
+  const notes = chat.body.messages.filter((m) => m.system && /Also picking up/.test(m.body));
+  assert.equal(notes.length, 2);
+  assert.ok(notes.some((m) => m.body.includes("Trip side table")));
+  assert.ok(notes.some((m) => m.body.includes("Trip mirror")));
+});
