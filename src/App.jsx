@@ -387,15 +387,41 @@ export default function Doorstep() {
     if (message) setToast(message);
   }, []);
 
-  const fetchItems = useCallback(async (t) => {
-    try {
-      const data = await api("/items", { token: t || undefined });
-      setItems(data.items);
-    } catch (e) {
-      if (e.status === 401) signOut("Your session expired — you're browsing as a guest.");
-      else setToast(e.message);
-    }
-  }, [signOut]);
+  /* The feed is paged and filtered by the database: with a few hundred live
+     listings, searching only what happened to be on the current page would
+     quietly miss most of the neighbourhood. */
+  const fetchItems = useCallback(
+    async (t, { append = false, offset = 0, sort, search, type, cat, radius, saved } = {}) => {
+      setFeed((f) => ({ ...f, loading: true }));
+      try {
+        const params = new URLSearchParams({ offset: String(offset), limit: "24" });
+        if (sort === "near") params.set("sort", "near");
+        if (search && search.trim()) params.set("q", search.trim());
+        if (type && type !== "all") params.set("type", type);
+        if (cat && cat !== "Going soonest") params.set("cat", cat);
+        if (radius && Number.isFinite(radius)) params.set("radius", String(radius));
+        if (saved) params.set("saved", "1");
+
+        const data = await api(`/items?${params}`, { token: t || undefined });
+        setItems((list) => {
+          if (!append) return data.items;
+          const seen = new Set(list.map((i) => i.id));
+          return [...list, ...data.items.filter((i) => !seen.has(i.id))];
+        });
+        setFeed({ total: data.total ?? data.items.length, more: !!data.more, loading: false });
+      } catch (e) {
+        setFeed((f) => ({ ...f, loading: false }));
+        if (e.status === 401) signOut("Your session expired — you're browsing as a guest.");
+        else setToast(e.message);
+      }
+    },
+    [signOut]
+  );
+
+  const refresh = useCallback(
+    (t) => fetchItems(t ?? token, { sort, search: q, type: typeFilter, cat: filter, radius, saved: savedOnly }),
+    [fetchItems, token, sort, q, typeFilter, filter, radius, savedOnly]
+  );
 
   /* Anything that needs an account routes through here: remember what they
      were trying to do, ask them to sign in, then carry it out. */
@@ -458,7 +484,7 @@ export default function Doorstep() {
       setNotes((list) => [{ id: msg.id, itemId: msg.itemId, title: msg.title, body: msg.body, createdAt: msg.createdAt, read: false }, ...list]);
       setUnread((n) => n + 1);
       setToast(`${msg.title} — ${msg.body}`);
-      fetchItems(token);
+      refresh();
     };
     return () => es.close();
   }, [token, user, fetchItems]);
@@ -509,10 +535,15 @@ export default function Doorstep() {
   const browsing = ["home", "map", "detail", "give", "profile", "notifications", "wishes", "impact", "fallback", "mine"].includes(screen);
   useEffect(() => {
     if (!browsing) return;
-    fetchItems(token);
-    const t = setInterval(() => fetchItems(token), 45 * 1000);
-    return () => clearInterval(t);
-  }, [browsing, token, fetchItems]);
+    const query = { sort, search: q, type: typeFilter, cat: filter, radius, saved: savedOnly };
+    /* debounced, so typing does not fire a request per letter */
+    const first = setTimeout(() => fetchItems(token, query), q ? 300 : 0);
+    const poll = setInterval(() => fetchItems(token, query), 45 * 1000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(poll);
+    };
+  }, [browsing, token, fetchItems, sort, q, typeFilter, filter, radius, savedOnly]);
 
   useEffect(() => {
     if (!toast) return;
@@ -615,7 +646,7 @@ export default function Doorstep() {
       setToken(data.token);
       setUser(data.user);
       setAuthReason(null);
-      await fetchItems(data.token);
+      await fetchItems(data.token, { sort, type: typeFilter });
 
       /* pick up whatever they were doing before we interrupted */
       const next = pending;
@@ -653,7 +684,7 @@ export default function Doorstep() {
       setToast(`Claimed. ${whereLine(updated)} Collect within 30 minutes.`);
     } catch (e) {
       setToast(e.message);
-      if (e.status === 409 || e.status === 410) fetchItems(token);
+      if (e.status === 409 || e.status === 410) refresh();
     }
   };
 
@@ -661,7 +692,7 @@ export default function Doorstep() {
     try {
       await api(`/items/${item.id}/collected`, { method: "POST", token });
       setThanking(item);
-      fetchItems(token);
+      refresh();
     } catch (e) {
       setToast(e.message);
     }
@@ -781,7 +812,7 @@ export default function Doorstep() {
       await api(`/users/${giver.id}/block`, { method: "POST", token });
       setScreen("home");
       setToast(`Blocked. You won't see ${giver.name}'s listings or alerts. Undo it in your profile.`);
-      fetchItems(token);
+      refresh();
     } catch (e) {
       setToast(e.message);
     }
@@ -790,7 +821,7 @@ export default function Doorstep() {
   const unblock = async (id) => {
     setBlocked((list) => list.filter((b) => b.id !== id));
     api(`/users/${id}/block`, { method: "DELETE", token }).catch(() => {});
-    fetchItems(token);
+    refresh();
   };
 
   const report = async (reason) => {
@@ -806,7 +837,7 @@ export default function Doorstep() {
             : "Thanks — reported. We look at every one."
       );
       if (res.hidden) {
-        fetchItems(token);
+        refresh();
         setScreen("home");
       }
     } catch (e) {
@@ -990,22 +1021,14 @@ export default function Doorstep() {
   const now = Date.now();
   const timeNow = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 
-  const inRadius = (it) => it.miles == null || it.miles <= radius;
-  const matchesSearch = (it) =>
-    !q.trim() || `${it.title} ${it.note} ${it.road}`.toLowerCase().includes(q.trim().toLowerCase());
-
-  const visible = items
-    .filter((it) => it.expiresAt > now)
-    .filter(inRadius)
-    .filter(matchesSearch)
-    .filter((it) => (savedOnly ? it.saved : true))
-    .filter((it) => (typeFilter === "all" ? true : (it.type || "nonfood") === typeFilter))
-    .filter((it) => (filter === "Going soonest" ? true : it.cat === filter))
-    .sort((a, b) => (sort === "near" && a.miles != null && b.miles != null ? a.miles - b.miles : a.expiresAt - b.expiresAt));
+  /* the database applied the search, category, type, radius and saved
+     filters — all that is left is dropping anything that expired while the
+     page sat open */
+  const visible = items.filter((it) => it.expiresAt > now);
 
   /* the headline counts what is actually on screen, filters and all —
      saying "13 things" above five cards is just wrong */
-  const liveCount = visible.filter((it) => it.status !== "taken").length;
+  const liveCount = feed.total || visible.length;
 
   /* Sheets belong to no single screen: they are opened from the feed, the
      detail screen and Your things, so they render alongside every one of
@@ -2475,6 +2498,27 @@ export default function Doorstep() {
                 <br />
                 Have something to pass on instead?
               </p>
+            )}
+
+            {feed.more && (
+              <button
+                className="ghost-btn more-btn"
+                disabled={feed.loading}
+                onClick={() =>
+                  fetchItems(token, {
+                    append: true,
+                    offset: items.length,
+                    sort,
+                    search: q,
+                    type: typeFilter,
+                    cat: filter,
+                    radius,
+                    saved: savedOnly,
+                  })
+                }
+              >
+                {feed.loading ? "Loading" : `Show more (${feed.total - items.length} to go)`}
+              </button>
             )}
 
             {recent.length > 0 && !q.trim() && (

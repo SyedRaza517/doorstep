@@ -800,3 +800,56 @@ test("the category list is published for both types", async () => {
   assert.equal(res.body.nonfood.length, 4);
   assert.ok(res.body.food.every((c) => c.cat && c.kind));
 });
+
+test("the feed is paged, and the pages do not overlap", async () => {
+  const token = await signIn("demo@doorstep.uk", "doorstep123");
+  const first = await call("/items?limit=4&offset=0", { token });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.items.length, 4);
+  assert.ok(first.body.total >= 8);
+  assert.equal(first.body.more, true);
+
+  const second = await call("/items?limit=4&offset=4", { token });
+  const ids = new Set(first.body.items.map((i) => i.id));
+  assert.ok(second.body.items.every((i) => !ids.has(i.id)), "page two must not repeat page one");
+
+  const last = await call(`/items?limit=100&offset=0`, { token });
+  assert.equal(last.body.more, false, "one big page should say there is no more");
+});
+
+test("searching and filtering happen in the database, across every page", async () => {
+  const token = await signIn("demo@doorstep.uk", "doorstep123");
+
+  /* create the thing being searched for, rather than leaning on a seeded
+     item that an earlier test may already have claimed or collected */
+  const giver = await newNeighbour("Search Subject");
+  await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Anglepoise zorbulon", cat: "Electricals", road: "Test Road, E8", address: "90 Test Road, London E8 3EP" },
+  });
+
+  const search = await call("/items?q=zorbulon", { token });
+  assert.equal(search.body.total, 1, "the search should find exactly the item just listed");
+  assert.ok(search.body.items.every((i) => /zorbulon/i.test(`${i.title} ${i.note} ${i.road}`)));
+
+  const food = await call("/items?type=food", { token });
+  assert.ok(food.body.total >= 3);
+  assert.ok(food.body.items.every((i) => i.type === "food"));
+
+  const kids = await call("/items?cat=Kids", { token });
+  assert.ok(kids.body.items.every((i) => i.cat === "Kids"));
+
+  /* a search that matches nothing should say so rather than returning the feed */
+  const none = await call("/items?q=zzzznotathing", { token });
+  assert.equal(none.body.total, 0);
+  assert.equal(none.body.items.length, 0);
+});
+
+test("a guest gets the same paging", async () => {
+  const res = await call("/items?limit=3");
+  assert.equal(res.status, 200);
+  assert.equal(res.body.guest, true);
+  assert.equal(res.body.items.length, 3);
+  assert.ok(res.body.total > 3);
+});

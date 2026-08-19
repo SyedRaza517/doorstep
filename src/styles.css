@@ -2022,3 +2022,9 @@
   border: 1.5px solid var(--rule);
   border-radius: 10px;
 }
+
+.more-btn { margin: 16px 0 4px; }
+
+/* a little more air between the sections of the feed */
+.feed .just-gone { margin-top: 28px; }
+.item-grid, .item-list { margin-top: 4px; }

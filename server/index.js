@@ -1,4 +1,5 @@
 import express from "express";
+import compression from "compression";
 import {
   query,
   one,
@@ -90,6 +91,11 @@ const BANNED_RE = new RegExp(
 );
 
 const app = express();
+
+/* Listings carry their photographs inline as data URLs, and a page of them
+   repeats the same illustration many times over. Gzip collapses that to a
+   fraction of the wire size, which matters most on a phone. */
+app.use(compression());
 app.use(express.json({ limit: "6mb" })); /* room for a few resized item photos */
 
 /* The web app (Vercel), the Android app (capacitor://) and the iOS app all
@@ -488,26 +494,92 @@ async function sweepLapsedClaims(now) {
   }
 }
 
+/* The feed is paged: a neighbourhood with a few hundred live listings would
+   otherwise send every photograph in one response. */
+const PAGE = 24;
+
 app.get(
   "/api/items",
   maybeAuth,
   wrap(async (req, res) => {
     const now = Date.now();
     await sweepLapsedClaims(now);
+
+    const limit = Math.max(1, Math.min(60, Number(req.query.limit) || PAGE));
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const nearest = req.query.sort === "near" && req.user.lat != null;
+
+    /* Filtering belongs in the query, not the browser: with a few hundred
+       listings, searching only what happened to be on the current page would
+       quietly miss most of the neighbourhood. */
+    const params = [now];
+    let clause = "expires_at > $1";
+    if (req.guest) {
+      clause += " AND hidden_at IS NULL";
+    } else {
+      params.push(req.user.id);
+      clause += ` AND (hidden_at IS NULL OR owner_id = $${params.length}) AND owner_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = $${params.length})`;
+    }
+
+    const q = String(req.query.q || "").trim();
+    if (q) {
+      params.push(`%${q}%`);
+      clause += ` AND (title ILIKE $${params.length} OR note ILIKE $${params.length} OR road ILIKE $${params.length})`;
+    }
+
+    const type = String(req.query.type || "");
+    if (type === "food" || type === "nonfood") {
+      params.push(type);
+      clause += ` AND type = $${params.length}`;
+    }
+
+    const cat = String(req.query.cat || "");
+    if (cat) {
+      params.push(cat);
+      clause += ` AND cat = $${params.length}`;
+    }
+
+    if (req.query.saved === "1" && !req.guest) {
+      params.push(req.user.id);
+      clause += ` AND id IN (SELECT item_id FROM saves WHERE user_id = $${params.length})`;
+    }
+
+    /* radius, as a bounding box in degrees — a mile is about 1/69 of a degree
+       of latitude, and longitude narrows with the cosine of latitude */
+    const radius = Number(req.query.radius);
+    if (radius > 0 && Number.isFinite(radius) && req.user.lat != null) {
+      const dLat = radius / 69;
+      const dLng = radius / (69 * Math.max(0.2, Math.cos((req.user.lat * Math.PI) / 180)));
+      params.push(req.user.lat - dLat, req.user.lat + dLat, req.user.lng - dLng, req.user.lng + dLng);
+      const i = params.length;
+      clause += ` AND lat BETWEEN $${i - 3} AND $${i - 2} AND lng BETWEEN $${i - 1} AND $${i}`;
+    }
+
+    const visible = { clause, params };
+
+    /* sorting by distance has to happen in the database, or paging would
+       reorder only the slice we happened to fetch */
+    const order = nearest
+      ? `ORDER BY (lat IS NULL), ((lat - ${Number(req.user.lat)}) * (lat - ${Number(req.user.lat)}) + (lng - ${Number(req.user.lng)}) * (lng - ${Number(req.user.lng)})), expires_at`
+      : "ORDER BY expires_at";
+
+    const [{ n: total }] = await query(`SELECT COUNT(*) AS n FROM items WHERE ${visible.clause}`, visible.params);
     const rows = (
-      req.guest
-        ? await query("SELECT * FROM items WHERE expires_at > $1 AND hidden_at IS NULL ORDER BY expires_at", [now])
-        : await query(
-            `SELECT * FROM items
-             WHERE expires_at > $1
-               AND (hidden_at IS NULL OR owner_id = $2)
-               AND owner_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = $2)
-             ORDER BY expires_at`,
-            [now, req.user.id]
-          )
+      await query(
+        `SELECT * FROM items WHERE ${visible.clause} ${order} LIMIT ${limit} OFFSET ${offset}`,
+        visible.params
+      )
     ).map(castItem);
+
     const ctx = await itemContext(rows, req.user);
-    res.json({ items: rows.map((it) => publicItem(it, req.user, now, ctx)), guest: req.guest });
+    res.json({
+      items: rows.map((it) => publicItem(it, req.user, now, ctx)),
+      total: num(total),
+      offset,
+      limit,
+      more: offset + rows.length < num(total),
+      guest: req.guest,
+    });
   })
 );
 
