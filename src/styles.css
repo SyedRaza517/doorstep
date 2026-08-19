@@ -3423,3 +3423,31 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
 .cover-row input { width: 18px; height: 18px; accent-color: var(--railing); }
 
 .rain-btn { display: flex; align-items: center; justify-content: center; gap: 8px; }
+
+/* ---------- the demand radar ---------- */
+.want-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  padding: 13px 14px;
+  margin-bottom: 9px;
+}
+.want-copy { flex: 1; min-width: 0; }
+.want-copy b { display: block; font-size: 14.5px; color: var(--ink); text-transform: capitalize; }
+.want-copy small { font-size: 12px; color: var(--hush); }
+.want-give {
+  flex: none;
+  border: none;
+  border-radius: 999px;
+  background: var(--railing);
+  color: #fff;
+  font-family: var(--body);
+  font-weight: 700;
+  font-size: 12.5px;
+  padding: 9px 16px;
+  cursor: pointer;
+}
+.want-give:active { transform: scale(0.96); }

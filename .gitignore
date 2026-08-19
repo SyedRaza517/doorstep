@@ -33,3 +33,4 @@ screenshots/debug*.png
 *.keystore
 *.p12
 keystore.properties
+.claude/

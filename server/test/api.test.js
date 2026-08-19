@@ -1274,3 +1274,25 @@ test("rain check pushes the window back and tells the savers", async () => {
   const cheeky = await call(`/items/${listed.body.id}/raincheck`, { method: "POST", token: saver });
   assert.equal(cheeky.status, 403);
 });
+
+test("the demand radar reads the wish list backwards, counts only", async () => {
+  const giver = await newNeighbour("Radar Giver"); /* E8 3EP */
+  const wisher1 = await newNeighbour("Radar Wisher One");
+  const wisher2 = await newNeighbour("Radar Wisher Two");
+
+  await call("/wishes", { method: "POST", token: wisher1, body: { keyword: "gramophone", cat: "Anything", radius: 5 } });
+  await call("/wishes", { method: "POST", token: wisher2, body: { keyword: "Gramophone", cat: "Anything", radius: 5 } });
+  /* a wish whose radius cannot reach the giver must not count */
+  const farWisher = await call("/auth/signup", {
+    method: "POST",
+    body: { name: "Too Far", email: `radar${Date.now()}@x.uk`, postcode: "M1 1AE", password: "doorstep123" },
+  });
+  await call("/wishes", { method: "POST", token: farWisher.body.token, body: { keyword: "gramophone", cat: "Anything", radius: 1 } });
+
+  const radar = await call("/demand", { token: giver });
+  assert.equal(radar.status, 200);
+  const gram = radar.body.wants.find((w) => w.label === "gramophone");
+  assert.ok(gram, "the want shows on the radar");
+  assert.equal(gram.count, 2, "two reachable wishers, casing folded, the far one excluded");
+  assert.ok(!JSON.stringify(radar.body).match(/Wisher One|Wisher Two/), "counts only, never who");
+});

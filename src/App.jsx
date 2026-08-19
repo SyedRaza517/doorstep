@@ -467,6 +467,7 @@ export default function Doorstep() {
   const [thread, setThread] = useState(null);
   const [hands, setHands] = useState([]);
   const [sky, setSky] = useState(null);
+  const [wants, setWants] = useState([]);
   const [draft, setDraft] = useState("");
   const chatEnd = useRef(null);
   const [reporting, setReporting] = useState(null);
@@ -675,6 +676,7 @@ export default function Doorstep() {
       api("/wishes", { token }).then((d) => setWishes(d.wishes)).catch(() => {});
     }
     if (screen === "impact") api("/impact", { token }).then(setImpact).catch(() => {});
+    if (screen === "radar") api("/demand", { token }).then((d) => setWants(d.wants)).catch(() => {});
     if (screen === "chats") api("/chats", { token }).then((d) => { setChats(d.chats); setChatUnread(d.unread); }).catch(() => {});
     if (screen === "detail" && detailId) {
       const it = items.find((x) => x.id === detailId);
@@ -714,7 +716,7 @@ export default function Doorstep() {
   }, [screen, token, tab, chatId]);
 
   /* the feed refreshes for guests too */
-  const browsing = ["home", "map", "detail", "give", "profile", "notifications", "wishes", "impact", "fallback", "mine", "chats", "chat"].includes(screen);
+  const browsing = ["home", "map", "detail", "give", "profile", "notifications", "wishes", "impact", "fallback", "mine", "chats", "chat", "radar"].includes(screen);
   useEffect(() => {
     if (!browsing) return;
     /* a map with only the first page of pins would look half empty */
@@ -2576,6 +2578,53 @@ export default function Doorstep() {
     );
   }
 
+  /* ---------------- the demand radar ---------------- */
+
+  if (screen === "radar") {
+    return (
+      <SubScreen title="What neighbours want" time={timeNow} toast={toast} onBack={() => setScreen("profile")}>
+        <p className="sub-lede">
+          What people near you are already waiting for. List one of these and someone gets told the
+          second it goes up — no waiting, no hoping.
+        </p>
+        {wants.length === 0 && (
+          <div className="wish-empty">
+            <img src={`${API}/photos/houseplant`} alt="" />
+            <b>Quiet on the radar</b>
+            <span>No wishes are pointed at your doorstep just now. It changes daily — worth a look back.</span>
+          </div>
+        )}
+        {wants.map((w) => (
+          <div key={w.label} className="want-row">
+            <span className="want-copy">
+              <b>{w.label}</b>
+              <small>
+                {w.count === 1 ? "One neighbour nearby is" : `${w.count} neighbours nearby are`} waiting for this
+              </small>
+            </span>
+            <button
+              className="want-give"
+              onClick={() => {
+                /* straight into the composer with the want already named */
+                setGive((g) => ({
+                  ...EMPTY_GIVE,
+                  title: w.label.startsWith("anything in") ? "" : w.label,
+                  cat: w.cat !== "Anything" ? w.cat : g.cat,
+                  address: g.address,
+                  road: g.road,
+                  spot: g.spot,
+                }));
+                setScreen("give");
+              }}
+            >
+              I have one
+            </button>
+          </div>
+        ))}
+      </SubScreen>
+    );
+  }
+
   /* ---------------- impact ---------------- */
 
   if (screen === "impact") {
@@ -2825,6 +2874,16 @@ export default function Doorstep() {
                   <span className="link-copy">
                     Add a wish
                     <span>Get told the moment someone lists what you want</span>
+                  </span>
+                  <span className="link-go" aria-hidden="true">›</span>
+                </button>
+                <button onClick={() => setScreen("radar")}>
+                  <span className="link-ic" aria-hidden="true">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="2" /><path d="M16.2 7.8a6 6 0 0 1 0 8.4M7.8 16.2a6 6 0 0 1 0-8.4M19 5a10 10 0 0 1 0 14M5 19A10 10 0 0 1 5 5" /></svg>
+                  </span>
+                  <span className="link-copy">
+                    What neighbours want
+                    <span>The wishes pointed at your doorstep — list one, make a day</span>
                   </span>
                   <span className="link-go" aria-hidden="true">›</span>
                 </button>

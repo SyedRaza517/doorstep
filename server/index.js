@@ -1422,6 +1422,40 @@ app.post(
   })
 );
 
+/* ---- the demand radar ----
+   Every competitor treats givers as saints to be thanked; this treats them
+   as people who need proof it's worth the faff of photographing a ladder.
+   The wish list, read backwards: what are the neighbours around you already
+   waiting for? Counts only, never who — a wish is private until it's met. */
+app.get(
+  "/api/demand",
+  auth,
+  wrap(async (req, res) => {
+    if (req.user.lat == null) return res.json({ wants: [] });
+    const wishes = await query(WISHES_SQL, [req.user.id]);
+
+    /* a wish counts if listing from my doorstep would reach it */
+    const reachable = wishes.filter(
+      (w) => w.ulat != null && milesBetween(w.ulat, w.ulng, req.user.lat, req.user.lng) <= w.radius
+    );
+
+    const byWant = new Map();
+    for (const w of reachable) {
+      const label = (w.keyword || "").trim().toLowerCase() || `anything in ${w.cat.toLowerCase()}`;
+      const entry = byWant.get(label) || { label, cat: w.cat, wishers: new Set() };
+      entry.wishers.add(num(w.user_id));
+      if (w.cat !== "Anything") entry.cat = w.cat;
+      byWant.set(label, entry);
+    }
+
+    const wants = [...byWant.values()]
+      .map((e) => ({ label: e.label, cat: e.cat, count: e.wishers.size }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 12);
+    res.json({ wants });
+  })
+);
+
 /* ---- notifications ---- */
 
 app.get(
