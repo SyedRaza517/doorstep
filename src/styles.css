@@ -385,19 +385,15 @@
 
 .controls-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin: 0 -18px 16px;
-  padding: 2px 18px 6px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  margin: 0 0 16px;
 }
-
-.controls-row::-webkit-scrollbar { display: none; }
-.controls-row > * { flex: none; }
 
 .segment {
   display: flex;
+  flex-wrap: wrap;
   background: var(--card);
   border: 1px solid var(--rule);
   border-radius: 22px;
@@ -426,37 +422,13 @@
 
 .chips {
   display: flex;
+  flex-wrap: wrap;
   gap: 7px;
-  overflow-x: auto;
-  margin: 0 -18px 12px;
-  padding: 2px 18px 6px;
-  scrollbar-width: none;
+  margin: 0 0 12px;
+  padding: 0;
 }
 
-.chips > * { flex: none; }
-
-/* the last chip should look cut off on purpose */
-.chips::after,
-.controls-row::after {
-  content: '';
-  flex: none;
-  width: 6px;
-}
-
-.scroll-strip {
-  position: relative;
-}
-
-.scroll-strip::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 6px;
-  width: 26px;
-  pointer-events: none;
-  background: linear-gradient(to right, rgba(229, 231, 223, 0), var(--render));
-}
+.scroll-strip { position: relative; }
 .chips::-webkit-scrollbar { display: none; }
 
 .chip {
@@ -1059,27 +1031,33 @@
 
 .just-gone { margin-top: 22px; }
 
+/* three across, sized to the screen — a carousel here just hid two of them
+   behind the edge */
 .gone-strip {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 6px;
-  scrollbar-width: none;
 }
-
-.gone-strip::-webkit-scrollbar { display: none; }
 
 .gone-chip {
-  flex: none;
-  width: 118px;
+  min-width: 0;
   background: var(--card);
-  border: 1.5px solid var(--rule);
-  border-radius: 11px;
-  padding: 10px 11px;
-  opacity: 0.75;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 10px;
+  opacity: 0.8;
 }
 
-.gone-chip b { display: block; font-size: 13px; font-weight: 600; line-height: 1.3; margin-top: 3px; }
+.gone-chip b {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .gone-chip small { display: block; font-family: var(--meter); font-size: 10.5px; color: var(--hush); margin-top: 3px; }
 
 /* ---------- alerts, saved searches, impact, fallback ---------- */
@@ -1295,33 +1273,30 @@
 
 .tabs {
   display: flex;
-  gap: 4px;
+  gap: 3px;
   background: var(--card);
-  border: 1.5px solid var(--rule);
-  border-radius: 11px;
+  border: 1px solid var(--rule);
+  border-radius: 14px;
   padding: 3px;
   margin-bottom: 16px;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
-
-.tabs::-webkit-scrollbar { display: none; }
 
 .tab {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 4px;
   font-family: var(--body);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   color: var(--hush);
   background: none;
   border: none;
-  border-radius: 8px;
-  padding: 8px 9px;
+  border-radius: 11px;
+  padding: 8px 4px;
   cursor: pointer;
   transition: background .12s, color .12s;
 }

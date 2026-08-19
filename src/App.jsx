@@ -2159,7 +2159,7 @@ export default function Doorstep() {
               <div className="just-gone">
                 <p className="sub-head">Just gone</p>
                 <div className="gone-strip">
-                  {recent.map((r, i) => (
+                  {recent.slice(0, 3).map((r, i) => (
                     <span key={i} className="gone-chip">
                       <Glyph kind={r.kind} size={26} />
                       <b>{r.title}</b>
