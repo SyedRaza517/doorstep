@@ -11,6 +11,7 @@ import {
   newToken,
   foldEmail,
   num,
+  photoLibrary,
 } from "./db.js";
 import { geocodePostcode, milesBetween, formatMiles, approxCoords, FALLBACK } from "./geo.js";
 import { specFromPhoto, hasCredentials } from "./autospec.js";
@@ -114,6 +115,23 @@ const fail = (res, status, error, field) => res.status(status).json({ error, ...
 /* Async handlers need their rejections turned into responses, otherwise a
    database hiccup hangs the request instead of answering it. */
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+/* The seeded illustrations are shared across hundreds of listings, so they
+   are served as ordinary images the browser can cache once, rather than
+   repeated inside every listing in every response. They never change, hence
+   the immutable year. */
+app.get("/api/photos/:slug", (req, res) => {
+  const url = photoLibrary()[String(req.params.slug).replace(/[^a-z0-9-]/gi, "")];
+  if (!url) return fail(res, 404, "No such picture");
+  const [, data] = url.split("base64,");
+  const buf = Buffer.from(data, "base64");
+  res.set({
+    "Content-Type": "image/jpeg",
+    "Cache-Control": "public, max-age=31536000, immutable",
+    "Content-Length": String(buf.length),
+  });
+  res.end(buf);
+});
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, service: "doorstep-api", time: new Date().toISOString() });
@@ -370,6 +388,7 @@ function publicItem(it, user, now, ctx) {
     spot: it.spot,
     photo: photoList(it)[0] || null,
     photos: photoList(it),
+    photoRef: it.photo_ref || null,
     owner,
     lat: pin ? pin.lat : null,
     lng: pin ? pin.lng : null,

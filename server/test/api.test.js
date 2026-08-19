@@ -366,10 +366,10 @@ test("three reports hide a listing, and nobody can report twice", async () => {
   assert.equal(r3.body.hidden, true, "three reports should hide it");
 
   const watcher = await signIn("demo@doorstep.uk", "doorstep123");
-  const feed = await call("/items", { token: watcher });
+  const feed = await call("/items?q=Sofa%20on%20the%20kerb", { token: watcher });
   assert.equal(feed.body.items.find((i) => i.id === id), undefined, "hidden items leave the feed");
 
-  const ownerFeed = await call("/items", { token: owner });
+  const ownerFeed = await call("/items?q=Sofa%20on%20the%20kerb", { token: owner });
   assert.ok(ownerFeed.body.items.find((i) => i.id === id), "the giver still sees their own listing");
 });
 
@@ -450,12 +450,12 @@ test("blocking a neighbour removes their listings and their alerts", async () =>
   });
   const giverId = listed.body.giver.id;
 
-  const before = await call("/items", { token: me });
+  const before = await call("/items?q=Suspicious%20sideboard", { token: me });
   assert.ok(before.body.items.find((i) => i.id === listed.body.id), "visible before blocking");
 
   assert.equal((await call(`/users/${giverId}/block`, { method: "POST", token: me })).status, 200);
 
-  const after = await call("/items", { token: me });
+  const after = await call("/items?q=Suspicious%20sideboard", { token: me });
   assert.equal(after.body.items.find((i) => i.id === listed.body.id), undefined, "blocked listings disappear");
   assert.ok((await call("/blocks", { token: me })).body.blocked.some((b) => b.id === giverId));
 
@@ -472,7 +472,7 @@ test("blocking a neighbour removes their listings and their alerts", async () =>
 
   await call(`/wishes/${alert.body.id}`, { method: "DELETE", token: me });
   assert.equal((await call(`/users/${giverId}/block`, { method: "DELETE", token: me })).status, 200);
-  const unblocked = await call("/items", { token: me });
+  const unblocked = await call("/items?q=Suspicious%20sideboard", { token: me });
   assert.ok(unblocked.body.items.find((i) => i.id === listed.body.id), "unblocking brings them back");
 });
 
@@ -780,11 +780,11 @@ test("categories belong to their type", async () => {
 
 test("the feed carries both kinds, and the seed has food in it", async () => {
   const token = await signIn("demo@doorstep.uk", "doorstep123");
-  const { body } = await call("/items", { token });
-  const food = body.items.filter((i) => i.type === "food");
-  const nonfood = body.items.filter((i) => i.type === "nonfood");
-  assert.ok(food.length >= 3, `expected seeded food, saw ${food.length}`);
-  assert.ok(nonfood.length >= 5, `expected seeded non-food, saw ${nonfood.length}`);
+  const foodPage = await call("/items?type=food&limit=40", { token });
+  const nonfoodPage = await call("/items?type=nonfood&limit=1", { token });
+  const food = foodPage.body.items;
+  assert.ok(foodPage.body.total >= 3, `expected seeded food, saw ${foodPage.body.total}`);
+  assert.ok(nonfoodPage.body.total >= 5, `expected seeded non-food, saw ${nonfoodPage.body.total}`);
   for (const f of food) {
     assert.ok(f.useBy > Date.now(), `${f.title} should not be past its use-by`);
     assert.ok(FOODCATS.includes(f.cat), `${f.cat} is not a food category`);
@@ -813,8 +813,11 @@ test("the feed is paged, and the pages do not overlap", async () => {
   const ids = new Set(first.body.items.map((i) => i.id));
   assert.ok(second.body.items.every((i) => !ids.has(i.id)), "page two must not repeat page one");
 
-  const last = await call(`/items?limit=100&offset=0`, { token });
-  assert.equal(last.body.more, false, "one big page should say there is no more");
+  /* the page size is capped, so page past the end instead of asking for everything */
+  const total = first.body.total;
+  const tail = await call(`/items?limit=60&offset=${Math.max(0, total - 1)}`, { token });
+  assert.equal(tail.body.more, false, "the last page should say there is no more");
+  assert.equal(tail.body.items.length, Math.min(1, total), "and it should hold the final item");
 });
 
 test("searching and filtering happen in the database, across every page", async () => {

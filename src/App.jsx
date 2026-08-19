@@ -27,6 +27,18 @@ async function api(path, { method = "GET", body, token } = {}) {
   return data;
 }
 
+/* A listing either carries its own photograph (someone uploaded it) or names
+   one from the shared library (the demo neighbourhood), which the browser
+   fetches once and caches. */
+const pictureOf = (item) =>
+  (item.photos && item.photos[0]) || item.photo || (item.photoRef ? `${API}/photos/${item.photoRef}` : null);
+
+const picturesOf = (item) => {
+  if (item.photos && item.photos.length) return item.photos;
+  if (item.photo) return [item.photo];
+  return item.photoRef ? [`${API}/photos/${item.photoRef}`] : [];
+};
+
 /* map popups are built with innerHTML, so user text must be escaped */
 const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -162,7 +174,7 @@ const StatusBar = ({ time }) => (
 /* Item photos, one at a time with dots. Falls back to the drawn glyph when a
    giver lists without a photo. */
 const Gallery = ({ item, shot, setShot }) => {
-  const shots = item.photos && item.photos.length ? item.photos : [];
+  const shots = picturesOf(item);
   const index = Math.min(shot, Math.max(0, shots.length - 1));
   return (
     <div className="detail-photo">
@@ -395,10 +407,10 @@ export default function Doorstep() {
      listings, searching only what happened to be on the current page would
      quietly miss most of the neighbourhood. */
   const fetchItems = useCallback(
-    async (t, { append = false, offset = 0, sort, search, type, cat, radius, saved } = {}) => {
+    async (t, { append = false, offset = 0, sort, search, type, cat, radius, saved, limit = 24 } = {}) => {
       setFeed((f) => ({ ...f, loading: true }));
       try {
-        const params = new URLSearchParams({ offset: String(offset), limit: "24" });
+        const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
         if (sort === "near") params.set("sort", "near");
         if (search && search.trim()) params.set("q", search.trim());
         if (type && type !== "all") params.set("type", type);
@@ -539,7 +551,8 @@ export default function Doorstep() {
   const browsing = ["home", "map", "detail", "give", "profile", "notifications", "wishes", "impact", "fallback", "mine"].includes(screen);
   useEffect(() => {
     if (!browsing) return;
-    const query = { sort, search: q, type: typeFilter, cat: filter, radius, saved: savedOnly };
+    /* a map with only the first page of pins would look half empty */
+    const query = { sort, search: q, type: typeFilter, cat: filter, radius, saved: savedOnly, limit: screen === "map" ? 60 : 24 };
     /* debounced, so typing does not fire a request per letter */
     const first = setTimeout(() => fetchItems(token, query), q ? 300 : 0);
     const poll = setInterval(() => fetchItems(token, query), 45 * 1000);
@@ -547,7 +560,7 @@ export default function Doorstep() {
       clearTimeout(first);
       clearInterval(poll);
     };
-  }, [browsing, token, fetchItems, sort, q, typeFilter, filter, radius, savedOnly]);
+  }, [browsing, token, fetchItems, sort, q, typeFilter, filter, radius, savedOnly, screen]);
 
   useEffect(() => {
     if (!toast) return;
@@ -591,8 +604,9 @@ export default function Doorstep() {
       const mine = it.owner || it.status === "yours";
       const food = it.type === "food";
       /* the photograph is the pin: far easier to read at a glance than a dot */
-      const inner = it.photo
-        ? `<img src="${esc(it.photo)}" alt="" />`
+      const pic = pictureOf(it);
+      const inner = pic
+        ? `<img src="${esc(pic)}" alt="" />`
         : `<span class="pin-letter">${esc(it.title.slice(0, 1).toUpperCase())}</span>`;
       const icon = L.divIcon({
         className: "",
@@ -1472,8 +1486,8 @@ export default function Doorstep() {
                             }}
                           >
                             <div className="gcard-photo">
-                              {a.photo ? (
-                                <img src={a.photo} alt="" loading="lazy" />
+                              {pictureOf(a) ? (
+                                <img src={pictureOf(a)} alt="" loading="lazy" />
                               ) : (
                                 <span className="gcard-glyph">
                                   <Glyph kind={a.kind} size={44} />
@@ -1549,7 +1563,7 @@ export default function Doorstep() {
             {stuff &&
               stuff.toCollect.map((it) => (
                 <div key={it.id} className="mine-row urgent-row">
-                  <div className="mine-thumb">{it.photo ? <img src={it.photo} alt="" /> : <Glyph kind={it.kind} size={34} />}</div>
+                  <div className="mine-thumb">{pictureOf(it) ? <img src={pictureOf(it)} alt="" /> : <Glyph kind={it.kind} size={34} />}</div>
                   <div className="mine-copy">
                     <b>{it.title}</b>
                     <span>{whereLine(it)}</span>
@@ -1585,7 +1599,7 @@ export default function Doorstep() {
             {stuff &&
               stuff.collected.map((it) => (
                 <div key={it.id} className="mine-row">
-                  <div className="mine-thumb">{it.photo ? <img src={it.photo} alt="" /> : <Glyph kind={it.kind} size={34} />}</div>
+                  <div className="mine-thumb">{pictureOf(it) ? <img src={pictureOf(it)} alt="" /> : <Glyph kind={it.kind} size={34} />}</div>
                   <div className="mine-copy">
                     <b>{it.title}</b>
                     {it.note && <span>{it.note}</span>}
@@ -1621,7 +1635,7 @@ export default function Doorstep() {
             {stuff &&
               stuff.listed.map((it) => (
                 <div key={it.id} className="mine-row">
-                  <div className="mine-thumb">{it.photo ? <img src={it.photo} alt="" /> : <Glyph kind={it.kind} size={34} />}</div>
+                  <div className="mine-thumb">{pictureOf(it) ? <img src={pictureOf(it)} alt="" /> : <Glyph kind={it.kind} size={34} />}</div>
                   <div className="mine-copy">
                     <b>{it.title}</b>
                     <span>{it.road}</span>
@@ -2093,7 +2107,7 @@ export default function Doorstep() {
                       }}
                     >
                       <div className="peek-photo">
-                        {it.photo ? <img src={it.photo} alt="" /> : <Glyph kind={it.kind} size={38} />}
+                        {pictureOf(it) ? <img src={pictureOf(it)} alt="" /> : <Glyph kind={it.kind} size={38} />}
                       </div>
                       <div className="peek-copy">
                         <b>{it.title}</b>
@@ -2575,27 +2589,6 @@ export default function Doorstep() {
               </div>
             )}
 
-            {feed.more && (
-              <button
-                className="ghost-btn more-btn"
-                disabled={feed.loading}
-                onClick={() =>
-                  fetchItems(token, {
-                    append: true,
-                    offset: items.length,
-                    sort,
-                    search: q,
-                    type: typeFilter,
-                    cat: filter,
-                    radius,
-                    saved: savedOnly,
-                  })
-                }
-              >
-                {feed.loading ? "Loading" : `Show more (${feed.total - items.length} to go)`}
-              </button>
-            )}
-
             {recent.length > 0 && !q.trim() && (
               <div className="just-gone">
                 <p className="sub-head">Just gone</p>
@@ -2632,8 +2625,8 @@ export default function Doorstep() {
                       onClick={open}
                     >
                       <div className="gcard-photo">
-                        {item.photo ? (
-                          <img src={item.photo} alt="" loading="lazy" />
+                        {pictureOf(item) ? (
+                          <img src={pictureOf(item)} alt="" loading="lazy" />
                         ) : (
                           <span className="gcard-glyph">
                             <Glyph kind={item.kind} size={54} />
@@ -2681,7 +2674,7 @@ export default function Doorstep() {
                   >
                     <div className="card-body">
                       <div className="thumb">
-                        {item.photo ? <img className="thumb-img" src={item.photo} alt="" loading="lazy" /> : <Glyph kind={item.kind} />}
+                        {pictureOf(item) ? <img className="thumb-img" src={pictureOf(item)} alt="" loading="lazy" /> : <Glyph kind={item.kind} />}
                         {!item.owner && (
                           <button
                             className={`save-star ${item.saved ? "on" : ""}`}
@@ -2740,6 +2733,28 @@ export default function Doorstep() {
                 );
               })}
             </div>
+
+            {feed.more && (
+              <button
+                className="ghost-btn more-btn"
+                disabled={feed.loading}
+                onClick={() =>
+                  fetchItems(token, {
+                    append: true,
+                    offset: items.length,
+                    sort,
+                    search: q,
+                    type: typeFilter,
+                    cat: filter,
+                    radius,
+                    saved: savedOnly,
+                  })
+                }
+              >
+                {feed.loading ? "Loading" : `Show more (${feed.total - items.length} to go)`}
+              </button>
+            )}
+
 
           </main>
 

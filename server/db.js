@@ -14,6 +14,33 @@ try {
   /* no illustrations available — the app falls back to its drawn glyphs */
 }
 
+/* A library of illustrations keyed by slug, shared across the catalogue, and
+   the catalogue itself: 200 listings with real Hackney roads and postcodes. */
+let PHOTO_LIB = {};
+try {
+  PHOTO_LIB = JSON.parse(fs.readFileSync(path.join(here, "seed-photo-library.json"), "utf8"));
+} catch {}
+
+export const photoLibrary = () => PHOTO_LIB;
+
+let CATALOGUE = [];
+try {
+  CATALOGUE = JSON.parse(fs.readFileSync(path.join(here, "seed-catalogue.json"), "utf8"));
+} catch {}
+
+/* which drawn glyph stands in when a slug has no illustration yet */
+const GLYPH_FOR_SLUG = {
+  bookcase: "bookcase", "shelf-unit": "bookcase", wardrobe: "bookcase", "chest-of-drawers": "bookcase",
+  armchair: "chairs", "dining-chair": "chairs", stool: "chairs", "coffee-table": "chairs", desk: "chairs", mirror: "chairs",
+  "toy-kitchen": "toys", "soft-toys": "toys", "board-games": "toys", "kids-books": "toys", "stair-gate": "toys",
+  "balance-bike": "bike", pushchair: "bike",
+  "high-chair": "baby", "baby-bath": "baby",
+  "plant-pot": "garden", houseplant: "garden", "garden-chair": "garden", "watering-can": "garden",
+  "plant-trays": "garden", "garden-tools": "garden",
+  "floor-lamp": "bookcase", "desk-lamp": "bookcase", kettle: "bookcase", toaster: "bookcase", fan: "bookcase", radio: "bookcase",
+  bread: "bread", vegetables: "veg", dairy: "dairy", tins: "tin", "ready-meal": "meal", drinks: "drink",
+};
+
 /* Postgres, two ways.
    In production DATABASE_URL points at Supabase and we use `pg`.
    Locally, and in tests, there is no server to run: PGlite is Postgres
@@ -162,7 +189,8 @@ CREATE TABLE IF NOT EXISTS items (
   hidden_at        BIGINT,
   type             TEXT NOT NULL DEFAULT 'nonfood',
   use_by           BIGINT,
-  portions         INTEGER NOT NULL DEFAULT 1
+  portions         INTEGER NOT NULL DEFAULT 1,
+  photo_ref        TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_items_expires ON items(expires_at);
@@ -253,6 +281,7 @@ export async function initDb() {
     ALTER TABLE items ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'nonfood';
     ALTER TABLE items ADD COLUMN IF NOT EXISTS use_by BIGINT;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS portions INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS photo_ref TEXT;
   `);
 }
 
@@ -321,6 +350,26 @@ const SEED_FOOD = [
   { giver: 0, title: "Tins: chickpeas, tomatoes", note: "Four tins, all in date, from a shop we no longer use.", cat: "Store cupboard", kind: "tin", road: "Sandringham Road, E8", postcode: "E8 2LR", lat: 51.54993, lng: -0.07267, address: "89 Sandringham Road, London E8 2LR", left: 175, spot: "front garden", portions: 4, useByDays: 200 },
   { giver: 1, title: "Two cartons of oat milk", note: "Unopened, we switched brands.", cat: "Drinks", kind: "drink", road: "Parkholme Road, E8", postcode: "E8 3AG", lat: 51.54462, lng: -0.06863, address: "34 Parkholme Road, London E8 3AG", left: 45, spot: "porch", portions: 2, useByDays: 9 },
 ];
+
+/* Coordinates for a seeded postcode: cached first, then postcodes.io, then
+   the middle of London Fields so a seed never fails on a bad connection. */
+async function geocodeSeed(postcode) {
+  const clean = String(postcode).toUpperCase().replace(/\s+/g, "");
+  const hit = await one("SELECT lat, lng FROM postcode_cache WHERE postcode = $1", [clean]);
+  if (hit) return hit;
+  try {
+    const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(clean)}`);
+    if (res.ok) {
+      const { result } = await res.json();
+      await query(
+        "INSERT INTO postcode_cache (postcode, lat, lng) VALUES ($1,$2,$3) ON CONFLICT (postcode) DO NOTHING",
+        [clean, result.latitude, result.longitude]
+      );
+      return { lat: result.latitude, lng: result.longitude };
+    }
+  } catch {}
+  return { lat: 51.54163, lng: -0.05754 };
+}
 
 export async function refreshSeed() {
   const now = Date.now();
@@ -397,6 +446,46 @@ export async function refreshSeed() {
         f.portions,
       ]
     );
+  }
+
+  /* The catalogue: 200 listings across twenty real Hackney roads. Each one
+     takes its illustration from the shared library by slug, so two hundred
+     items cost the size of thirty-odd pictures rather than two hundred. */
+  if (CATALOGUE.length) {
+    /* the row stores which illustration to use, not the illustration itself:
+       two hundred listings share thirty-odd pictures, and the browser can
+       cache each one once instead of receiving it in every response */
+    const insert = `INSERT INTO items
+      (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, postcode, lat, lng, spot, photo, photos, type, use_by, portions, photo_ref)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`;
+
+    for (const [i, c] of CATALOGUE.entries()) {
+      const coords = await geocodeSeed(c.postcode);
+      const windowMs = (c.windowHours || 2) * 60 * 60 * 1000;
+      const expires = now + c.minutesLeft * 60 * 1000;
+      await query(insert, [
+        giverIds[i % giverIds.length],
+        c.title,
+        c.note,
+        c.cat,
+        GLYPH_FOR_SLUG[c.photo] || "bookcase",
+        c.road,
+        `${c.house} ${c.road.replace(/,.*$/, "")}, London ${c.postcode}`,
+        windowMs,
+        expires,
+        now,
+        c.postcode,
+        coords.lat,
+        coords.lng,
+        c.spot,
+        null,
+        "[]",
+        c.type,
+        c.type === "food" ? now + c.useByDays * 24 * 60 * 60 * 1000 : null,
+        c.type === "food" ? c.portions : 1,
+        c.photo,
+      ]);
+    }
   }
 
   /* collected history, owned by the seed givers and taken by the demo user */
