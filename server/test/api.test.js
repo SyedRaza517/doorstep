@@ -1488,3 +1488,60 @@ test("an item passport follows a thing from home to home", async () => {
   assert.equal(bogus.status, 201, "a broken link never blocks a listing");
   assert.equal(bogus.body.passport, null);
 });
+
+test("Spotted: a kerbside pile needs a FREE sign, counts grabs once each, thanks the spotter, and two reports kill it", async () => {
+  const spotter = await newNeighbour("Kerb Spotter");
+  const taker = await newNeighbour("Kerb Taker");
+  const third = await newNeighbour("Kerb Third");
+
+  /* without the FREE-sign confirmation there is no post — it is the one rule
+     that keeps this from becoming a catalogue of other people's belongings */
+  const refused = await call("/spots", { method: "POST", token: spotter, body: { note: "Box of books and a lamp" } });
+  assert.equal(refused.status, 400);
+  assert.match(refused.body.error, /clearly being given away/);
+
+  const posted = await call("/spots", {
+    method: "POST",
+    token: spotter,
+    body: { note: "Box of books and a lamp", road: "Test Road, E8", lat: 51.54321, lng: -0.05678, freeSign: true },
+  });
+  assert.equal(posted.status, 201);
+
+  /* the strip shows it with the exact coordinates — a kerbside pile is
+     already public, so there is nothing to fuzz */
+  const feed = await call("/spots", { token: taker });
+  const s = feed.body.spots.find((x) => x.id === posted.body.id);
+  assert.ok(s, "the spot shows in the strip");
+  assert.equal(s.lat, 51.54321);
+  assert.equal(s.lng, -0.05678);
+
+  /* a neighbour grabs something: the counter moves once per person, and the
+     spotter hears about it exactly once */
+  const took = await call(`/spots/${posted.body.id}/took`, { method: "POST", token: taker });
+  assert.equal(took.body.takenCount, 1);
+  const again = await call(`/spots/${posted.body.id}/took`, { method: "POST", token: taker });
+  assert.equal(again.body.alreadyTook, true);
+
+  const heard = await call("/notifications", { token: spotter });
+  assert.equal(heard.body.notifications.filter((n) => /Good eye/.test(n.body)).length, 1, "the spotter is thanked once");
+
+  /* the spotter marking their own grab still moves the counter, but rings no bell */
+  const own = await call(`/spots/${posted.body.id}/took`, { method: "POST", token: spotter });
+  assert.equal(own.body.takenCount, 2);
+  const silent = await call("/notifications", { token: spotter });
+  assert.equal(silent.body.notifications.filter((n) => /Good eye/.test(n.body)).length, 1, "no self-congratulation");
+
+  /* one report leaves it up, the same voice twice changes nothing, and a
+     second neighbour takes it down — it is probably someone's property or
+     bin-day waste, so it dies fast */
+  await call(`/spots/${posted.body.id}/report`, { method: "POST", token: taker });
+  const dup = await call(`/spots/${posted.body.id}/report`, { method: "POST", token: taker });
+  assert.equal(dup.body.alreadyReported, true);
+  let live = await call("/spots", { token: third });
+  assert.ok(live.body.spots.some((x) => x.id === posted.body.id), "one voice is not enough");
+
+  const second = await call(`/spots/${posted.body.id}/report`, { method: "POST", token: third });
+  assert.equal(second.body.hidden, true);
+  live = await call("/spots", { token: third });
+  assert.ok(!live.body.spots.some((x) => x.id === posted.body.id), "two voices take it down");
+});

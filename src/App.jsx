@@ -146,6 +146,25 @@ const Glyph = ({ kind, size = 52 }) => {
   );
 };
 
+/* A drawn kerb pile for spots posted without a photo: a box of odds and ends
+   with a FREE sign leaning against it, in brick — the wilder cousin of the
+   railing-green doorstep glyphs. */
+const KerbPile = ({ size = 52 }) => {
+  const b = "#A64B2A";
+  const g = "#234A3B";
+  return (
+    <svg width={size} height={size} viewBox="0 0 52 52" aria-hidden="true">
+      <path d="M6 44h40" stroke={g} strokeWidth="2.5" strokeLinecap="round" />
+      <path d="M12 30h20v14H12z" fill="none" stroke={b} strokeWidth="2.5" strokeLinejoin="round" />
+      <path d="M12 30l3-6h14l3 6" fill="none" stroke={b} strokeWidth="2.5" strokeLinejoin="round" />
+      <path d="M22 24v-7m0 0c-3 0-5-2-5-5 3 0 5 2 5 5zm0 0c3 0 5-2 5-5-3 0-5 2-5 5z" fill="none" stroke={g} strokeWidth="2" strokeLinecap="round" />
+      <rect x="34" y="26" width="12" height="10" rx="1.5" fill="#F5C518" stroke={b} strokeWidth="2" />
+      <path d="M36.5 31.5v-3h2m-2 1.5h1.5M41 28.5v3m0-3h2m-2 1.5h1.5" stroke={b} strokeWidth="1.4" strokeLinecap="round" fill="none" />
+      <path d="M40 36v8" stroke={b} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+};
+
 /* fake status bar — only visible inside the desktop phone shell */
 const StatusBar = ({ time }) => (
   <div className="statusbar" aria-hidden="true">
@@ -642,6 +661,13 @@ export default function Doorstep() {
   const [fallback, setFallback] = useState(null);
   const [recent, setRecent] = useState([]);
   const goneStrip = useRef(null);
+  /* kerbside piles spotted by passers-by: the strip on the home screen, the
+     little compose form, and its own file input so a spot photo never lands
+     in a half-written give form */
+  const [spots, setSpots] = useState([]);
+  const [spotForm, setSpotForm] = useState({ note: "", road: "", photo: null, freeSign: false });
+  const [spotErrors, setSpotErrors] = useState({});
+  const spotFileRef = useRef(null);
   /* the arrangement threads: the list, the open one, and what's unread */
   const [chats, setChats] = useState([]);
   const [chatUnread, setChatUnread] = useState(0);
@@ -850,6 +876,10 @@ export default function Doorstep() {
   /* per-screen data */
   useEffect(() => {
     if (screen === "home") api("/items/recent").then((d) => setRecent(d.items)).catch(() => {});
+    /* spotted piles ride along with the home feed, and the map needs them
+       too so its pins can show the wilder kerbside finds beside the doorsteps */
+    if (screen === "home" || screen === "map")
+      api("/spots", { token: token || undefined }).then((d) => setSpots(d.spots)).catch(() => {});
     if (!token) return;
     if (screen === "wishes") api("/wishes", { token }).then((d) => setWishes(d.wishes)).catch(() => {});
     if (screen === "mine") {
@@ -985,9 +1015,25 @@ export default function Doorstep() {
         .on("click", () => setPeek(it.id));
     }
 
+    /* Spotted kerbside piles get their own pin: a brick parcel rather than a
+       photograph, because nobody owns them and there is no detail screen to
+       open — a popup with the note and how long ago says everything. */
+    const piles = spots.filter((s) => s.lat != null);
+    for (const s of piles) {
+      const icon = L.divIcon({
+        className: "",
+        html: `<div class="spot-pin"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 3 7.5v9L12 21l9-4.5v-9z"/><path d="M3 7.5 12 12l9-4.5M12 12v9"/></svg><i></i></div>`,
+        iconSize: [34, 40],
+        iconAnchor: [17, 38],
+      });
+      L.marker([s.lat, s.lng], { icon, riseOnHover: true })
+        .addTo(layer)
+        .bindPopup(`<b>${esc(s.note)}</b><br/>spotted ${s.agoMinutes} min ago`);
+    }
+
     /* fit the view to what is actually out there */
-    if (live.length) {
-      const pts = live.map((i) => [i.lat, i.lng]);
+    if (live.length || piles.length) {
+      const pts = [...live.map((i) => [i.lat, i.lng]), ...piles.map((s) => [s.lat, s.lng])];
       if (user && user.lat != null) pts.push([user.lat, user.lng]);
       m.fitBounds(L.latLngBounds(pts).pad(0.18), { animate: false, maxZoom: 16 });
     }
@@ -995,7 +1041,7 @@ export default function Doorstep() {
     return () => {
       layer.remove();
     };
-  }, [screen, items, user]);
+  }, [screen, items, spots, user]);
 
   /* ---- auth handlers ---- */
 
@@ -1249,6 +1295,70 @@ export default function Doorstep() {
     try {
       await api(`/items/${item.id}/thanks`, { method: "POST", token, body: { token: kind } });
       setToast("Sent. They'll see it in their alerts.");
+    } catch (e) {
+      setToast(e.message);
+    }
+  };
+
+  /* ---- spotted piles ---- */
+
+  /* one photo, not a strip: a spot is a snapshot in passing, not a listing */
+  const onSpotPhoto = async (e) => {
+    const file = (e.target.files || [])[0];
+    e.target.value = "";
+    if (!file) return;
+    const shot = await shrink(file).catch(() => null);
+    if (!shot) {
+      setSpotErrors((p) => ({ ...p, photo: "That photo didn't come through — try taking it again" }));
+      return;
+    }
+    setSpotForm((f) => ({ ...f, photo: shot }));
+    setSpotErrors((p) => (p.photo ? { ...p, photo: null } : p));
+  };
+
+  const submitSpot = async () => {
+    const next = {};
+    if (!spotForm.note.trim()) next.note = "Say what's in the pile";
+    if (!spotForm.freeSign) next.freeSign = "Only post piles that are clearly being given away";
+    setSpotErrors(next);
+    if (Object.keys(next).length > 0) return;
+
+    setBusy(true);
+    try {
+      const created = await api("/spots", {
+        method: "POST",
+        token,
+        body: { note: spotForm.note.trim(), photo: spotForm.photo, road: spotForm.road.trim(), freeSign: true },
+      });
+      setSpots((list) => [created, ...list].slice(0, 20));
+      setSpotForm({ note: "", road: "", photo: null, freeSign: false });
+      setScreen("home");
+      setToast("Spotted. Everyone nearby can see it for 2 hours.");
+    } catch (e) {
+      setSpotErrors(e.field ? { [e.field]: e.message } : { _form: e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const tookFromSpot = async (s) => {
+    if (needsAccount("Sign in to tell the spotter something's been grabbed")) return;
+    try {
+      const d = await api(`/spots/${s.id}/took`, { method: "POST", token });
+      setSpots((list) => list.map((x) => (x.id === s.id ? { ...x, takenCount: d.takenCount } : x)));
+      if (!d.alreadyTook) setToast(s.mine ? "Noted — the pile's still doing its job." : "Noted — and the spotter's been thanked.");
+    } catch (e) {
+      setToast(e.message);
+    }
+  };
+
+  const reportSpot = async (s) => {
+    if (needsAccount("Sign in to report a spotted pile")) return;
+    try {
+      const d = await api(`/spots/${s.id}/report`, { method: "POST", token });
+      /* two reports kill it, so if this was the second the strip loses it now */
+      if (d.hidden) setSpots((list) => list.filter((x) => x.id !== s.id));
+      setToast(d.alreadyReported ? "You've already flagged that one." : "Flagged. Two flags take a spot down.");
     } catch (e) {
       setToast(e.message);
     }
@@ -3403,6 +3513,91 @@ export default function Doorstep() {
 
   /* ---------------- map ---------------- */
 
+  /* ---------------- spotted a pile ---------------- */
+
+  if (screen === "spot") {
+    return (
+      <SubScreen title="Spotted a pile?" time={timeNow} toast={toast} sheets={sheets} onBack={() => { setScreen("home"); setSpotErrors({}); }}>
+        <p className="spot-intro">
+          Someone's put a FREE pile out on the street. It isn't yours to promise to anyone — this just tells
+          neighbours it's there, exactly where it is, for the next two hours.
+        </p>
+
+        <input ref={spotFileRef} type="file" accept="image/*" capture="environment" hidden onChange={onSpotPhoto} />
+        <button
+          className={`photo-box spot-photo ${spotForm.photo ? "has-photo" : ""}`}
+          onClick={() => spotFileRef.current && spotFileRef.current.click()}
+        >
+          {spotForm.photo ? (
+            <img src={spotForm.photo} alt="The pile" />
+          ) : (
+            <span className="photo-hint">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z" />
+                <circle cx="12" cy="13" r="3.5" />
+              </svg>
+              Photograph the pile
+              <small>A picture is what gets people to walk over</small>
+            </span>
+          )}
+        </button>
+        {spotErrors.photo && <p className="field-note">{spotErrors.photo}</p>}
+
+        <div className={`field ${spotErrors.note ? "bad" : ""}`}>
+          <label htmlFor="sp-note">What's there</label>
+          <input
+            id="sp-note"
+            value={spotForm.note}
+            maxLength={140}
+            onChange={(e) => {
+              const v = e.target.value;
+              setSpotForm((f) => ({ ...f, note: v }));
+              setSpotErrors((p) => (p.note || p._form ? { ...p, note: null, _form: null } : p));
+            }}
+            placeholder="Box of books and a lamp, outside the church"
+          />
+          {spotErrors.note && <p className="field-note">{spotErrors.note}</p>}
+        </div>
+
+        <div className="field">
+          <label htmlFor="sp-road">Which road</label>
+          <input
+            id="sp-road"
+            value={spotForm.road}
+            onChange={(e) => {
+              const v = e.target.value;
+              setSpotForm((f) => ({ ...f, road: v }));
+            }}
+            placeholder="Wilton Way, E8"
+          />
+        </div>
+
+        <label className={`cover-row spot-confirm ${spotErrors.freeSign ? "bad" : ""}`}>
+          <input
+            type="checkbox"
+            checked={spotForm.freeSign}
+            onChange={(e) => {
+              const v = e.target.checked;
+              setSpotForm((f) => ({ ...f, freeSign: v }));
+              setSpotErrors((p) => (p.freeSign ? { ...p, freeSign: null } : p));
+            }}
+          />
+          <span>There's a FREE sign, or it's clearly a giveaway pile</span>
+        </label>
+        {spotErrors.freeSign && <p className="field-note">{spotErrors.freeSign}</p>}
+        {spotErrors._form && <p className="field-note">{spotErrors._form}</p>}
+
+        <button className="primary-btn" disabled={busy} onClick={submitSpot}>
+          {busy ? "Posting…" : "Post it — 2 hours, then it's gone"}
+        </button>
+        <p className="spot-small-print">
+          No claims, no holds — first come, first served. If it's actually someone's property, neighbours can flag
+          it and it comes straight down.
+        </p>
+      </SubScreen>
+    );
+  }
+
   if (screen === "map") {
     return (
       <div className="ds-root">
@@ -4225,6 +4420,66 @@ export default function Doorstep() {
                   ))}
                 </div>
               </div>
+            )}
+
+            {/* Kerbside piles spotted by passers-by: not listings, not
+                claimable, just "it's there right now, go and look". They sit
+                between Just gone and the grid because they are the most
+                perishable thing on the screen. */}
+            {spots.length > 0 && !q.trim() && (
+              <div className="spotted">
+                <p className="sub-head">Spotted on the kerb</p>
+                <div className="spot-strip" data-carousel="spots">
+                  {spots.map((s) => (
+                    <div key={s.id} className="spot-card">
+                      <div className="spot-pic">
+                        {s.photo ? <img src={s.photo} alt="" loading="lazy" /> : <KerbPile size={40} />}
+                      </div>
+                      <p className="spot-note">{s.note}</p>
+                      <small className="spot-meta">
+                        {[s.road, agoLabel(s.agoMinutes)].filter(Boolean).join(" · ")}
+                        {s.takenCount > 0 ? ` · ${s.takenCount} grabbed` : ""}
+                      </small>
+                      <div className="spot-actions">
+                        <button className="spot-took" onClick={() => tookFromSpot(s)}>
+                          I took something
+                        </button>
+                        <button className="spot-flag" aria-label="Report this pile" title="Report this pile" onClick={() => reportSpot(s)}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M4 21V4m0 1h13l-2.5 4L17 13H4" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    className="spot-add"
+                    onClick={() => {
+                      if (needsAccount("Sign in to post a pile you've spotted")) return;
+                      setSpotErrors({});
+                      setScreen("spot");
+                    }}
+                  >
+                    Spotted a pile?
+                    <small>Post it for 2 hours</small>
+                  </button>
+                </div>
+              </div>
+            )}
+            {/* no piles about, but a signed-in neighbour might be looking at one right now */}
+            {spots.length === 0 && !q.trim() && token && (
+              <button
+                className="spot-empty-cta"
+                onClick={() => {
+                  setSpotErrors({});
+                  setScreen("spot");
+                }}
+              >
+                <KerbPile size={26} />
+                <span>
+                  Walked past a FREE pile? <b>Spot it</b> — everyone nearby sees it for 2 hours.
+                </span>
+              </button>
             )}
 
             <div className={view === "grid" ? "item-grid" : "item-list"}>

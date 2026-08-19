@@ -31,6 +31,15 @@ const MAX_ACTIVE_CLAIMS = 3;
 const CLAIMS_PER_28_DAYS = 25;
 /* three independent reports hide a listing pending review */
 const REPORTS_TO_HIDE = 3;
+/* A spotted kerbside pile is nobody's listing: the poster can't vouch for it,
+   so the bar for killing one is lower — two reports and it's gone, because
+   the likeliest complaints are "that's someone's property" or "that's
+   bin-day waste", and both need acting on fast. */
+const SPOT_REPORTS_TO_HIDE = 2;
+/* a pavement pile rarely survives the afternoon, so a spot lives two hours, hard */
+const SPOT_LIFE_MS = 2 * 60 * 60 * 1000;
+/* and nobody needs to be the neighbourhood's full-time kerb correspondent */
+const MAX_LIVE_SPOTS = 3;
 const REPORT_REASONS = ["pavement", "unsafe", "not-free", "sold-on", "offensive", "gone", "other"];
 
 const POSTCODE_RE = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i;
@@ -1335,6 +1344,128 @@ app.post(
   })
 );
 
+/* ---- Spotted: the kerbside FREE pile ----
+   Someone walking past a pile of free stuff photographs it and posts it.
+   It is not their property, so none of the listing machinery applies: no
+   claim, no hold, no chat, no relist. Pure first-come, exact coordinates
+   (a kerbside pile is already public), and a hard two-hour expiry. */
+
+const publicSpot = (s, user, now) => ({
+  id: num(s.id),
+  note: s.note,
+  photo: s.photo || null,
+  lat: s.lat,
+  lng: s.lng,
+  road: s.road || null,
+  agoMinutes: Math.max(1, Math.round((now - num(s.created_at)) / 60000)),
+  takenCount: num(s.taken_count),
+  mine: num(s.spotter_id) === user.id,
+});
+
+app.post(
+  "/api/spots",
+  auth,
+  wrap(async (req, res) => {
+    const { note = "", photo = null, lat = null, lng = null, road = "", freeSign = false } = req.body || {};
+    /* the one rule that keeps this from becoming a theft catalogue: the
+       poster must vouch that the pile is visibly being given away */
+    if (freeSign !== true) return fail(res, 400, "Only post piles that are clearly being given away", "freeSign");
+    const text = String(note).trim();
+    if (!text) return fail(res, 400, "Say what's in the pile", "note");
+    if (text.length > 140) return fail(res, 400, "Keep it short — 140 characters is plenty", "note");
+    /* same shape as item photos: one data URL, capped at the same size */
+    if (photo != null && (typeof photo !== "string" || !photo.startsWith("data:image/") || photo.length > 2_000_000))
+      return fail(res, 400, "That photo didn't come through — try taking it again", "photo");
+
+    const now = Date.now();
+    const { n } = await one(
+      "SELECT COUNT(*) AS n FROM spots WHERE spotter_id = $1 AND expires_at > $2 AND hidden_at IS NULL",
+      [req.user.id, now]
+    );
+    if (num(n) >= MAX_LIVE_SPOTS)
+      return fail(res, 400, `${MAX_LIVE_SPOTS} live spots is plenty — one of yours has to lapse first`);
+
+    /* the spotter is standing next to the pile more often than not, so their
+       own coordinates are a fair default when the phone offers nothing better */
+    const plat = Number.isFinite(Number(lat)) && lat !== null && lat !== "" ? Number(lat) : req.user.lat;
+    const plng = Number.isFinite(Number(lng)) && lng !== null && lng !== "" ? Number(lng) : req.user.lng;
+
+    const row = await one(
+      `INSERT INTO spots (spotter_id, note, photo, lat, lng, road, created_at, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [req.user.id, text, photo, plat, plng, String(road).trim() || null, now, now + SPOT_LIFE_MS]
+    );
+    res.status(201).json(publicSpot(row, req.user, now));
+  })
+);
+
+app.get(
+  "/api/spots",
+  maybeAuth,
+  wrap(async (req, res) => {
+    const now = Date.now();
+    const rows = await query(
+      "SELECT * FROM spots WHERE expires_at > $1 AND hidden_at IS NULL ORDER BY created_at DESC LIMIT 20",
+      [now]
+    );
+    res.json({ spots: rows.map((s) => publicSpot(s, req.user, now)) });
+  })
+);
+
+app.post(
+  "/api/spots/:id/took",
+  auth,
+  wrap(async (req, res) => {
+    const now = Date.now();
+    const s = await one("SELECT * FROM spots WHERE id = $1", [req.params.id]);
+    if (!s || s.hidden_at != null) return fail(res, 404, "That spot doesn't exist");
+    if (num(s.expires_at) <= now) return fail(res, 410, "That spot has lapsed — the pile is probably gone");
+
+    /* once per person, however many trips they make back to the pile */
+    const inserted = await query(
+      "INSERT INTO spot_takes (spot_id, user_id, at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING RETURNING spot_id",
+      [s.id, req.user.id, now]
+    );
+    if (!inserted.length) return res.json({ ok: true, alreadyTook: true, takenCount: num(s.taken_count) });
+
+    const updated = await one("UPDATE spots SET taken_count = taken_count + 1 WHERE id = $1 RETURNING taken_count", [s.id]);
+
+    /* thank the spotter — unless they are thanking themselves */
+    if (num(s.spotter_id) !== req.user.id) {
+      const body = `Someone grabbed something from the pile you spotted on ${s.road || "the kerb"}. Good eye.`;
+      const row = await one(
+        "INSERT INTO notifications (user_id, item_id, title, body, created_at) VALUES ($1,NULL,$2,$3,$4) RETURNING id",
+        [num(s.spotter_id), "Spotted pile", body, now]
+      );
+      pushTo(num(s.spotter_id), { type: "alert", id: num(row.id), itemId: null, title: "Spotted pile", body, createdAt: now });
+    }
+    res.json({ ok: true, takenCount: num(updated.taken_count) });
+  })
+);
+
+app.post(
+  "/api/spots/:id/report",
+  auth,
+  wrap(async (req, res) => {
+    const now = Date.now();
+    const s = await one("SELECT * FROM spots WHERE id = $1", [req.params.id]);
+    if (!s) return fail(res, 404, "That spot doesn't exist");
+
+    const inserted = await query(
+      "INSERT INTO spot_reports (spot_id, user_id, at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING RETURNING spot_id",
+      [s.id, req.user.id, now]
+    );
+    if (!inserted.length) return res.json({ ok: true, alreadyReported: true });
+
+    const updated = await one("UPDATE spots SET reports = reports + 1 WHERE id = $1 RETURNING reports", [s.id]);
+    /* two voices and it comes down: the likeliest truth is that it is
+       someone's property or bin-day waste, and neither should sit in the feed */
+    const hidden = num(updated.reports) >= SPOT_REPORTS_TO_HIDE;
+    if (hidden && s.hidden_at == null) await query("UPDATE spots SET hidden_at = $1 WHERE id = $2", [now, s.id]);
+    res.json({ ok: true, hidden });
+  })
+);
+
 app.get("/api/detail-fields", (req, res) => {
   res.json({
     common: DETAIL_FIELDS.common,
@@ -2489,6 +2620,12 @@ app.delete(
       await q("DELETE FROM wishes WHERE user_id = $1", [id]);
       await q("DELETE FROM notifications WHERE user_id = $1", [id]);
       await q("DELETE FROM saves WHERE user_id = $1", [id]);
+      /* spotted piles are theirs in authorship even if not in property, so
+         they go entirely — takes and reports on other people's spots first,
+         then their own spots, whose takes and reports cascade with them */
+      await q("DELETE FROM spot_takes WHERE user_id = $1", [id]);
+      await q("DELETE FROM spot_reports WHERE user_id = $1", [id]);
+      await q("DELETE FROM spots WHERE spotter_id = $1", [id]);
       await q("DELETE FROM blocks WHERE blocker_id = $1 OR blocked_id = $1", [id]);
       await q("DELETE FROM follows WHERE follower_id = $1 OR giver_id = $1", [id]);
       /* lineage_notes need nothing here: the account row is anonymised below

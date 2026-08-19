@@ -354,6 +354,45 @@ CREATE TABLE IF NOT EXISTS reports (
   created_at  BIGINT NOT NULL,
   UNIQUE (item_id, reporter_id)
 );
+
+/* "Spotted": a kerbside FREE pile photographed by a passer-by. It is not the
+   spotter's property, so there is no claim, no hold and no relist — just a
+   note, an exact location, and a hard two-hour life before the row goes
+   quiet. taken_count is the strip's social proof; reports kill it fast when
+   it turns out to be someone's belongings or bin-day waste. */
+CREATE TABLE IF NOT EXISTS spots (
+  id          BIGSERIAL PRIMARY KEY,
+  spotter_id  BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  note        TEXT NOT NULL,
+  photo       TEXT,
+  lat         DOUBLE PRECISION,
+  lng         DOUBLE PRECISION,
+  road        TEXT,
+  created_at  BIGINT NOT NULL,
+  expires_at  BIGINT NOT NULL,
+  taken_count INTEGER NOT NULL DEFAULT 0,
+  reports     INTEGER NOT NULL DEFAULT 0,
+  hidden_at   BIGINT
+);
+
+CREATE INDEX IF NOT EXISTS idx_spots_expires ON spots(expires_at);
+
+/* Who already said "I took something" from which pile, so the counter moves
+   once per person however many times they tap. */
+CREATE TABLE IF NOT EXISTS spot_takes (
+  spot_id BIGINT NOT NULL REFERENCES spots(id) ON DELETE CASCADE,
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  at      BIGINT NOT NULL,
+  PRIMARY KEY (spot_id, user_id)
+);
+
+/* Same shape for reports: one voice per neighbour, two voices take it down. */
+CREATE TABLE IF NOT EXISTS spot_reports (
+  spot_id BIGINT NOT NULL REFERENCES spots(id) ON DELETE CASCADE,
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  at      BIGINT NOT NULL,
+  PRIMARY KEY (spot_id, user_id)
+);
 `;
 
 export async function initDb() {
