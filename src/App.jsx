@@ -4950,9 +4950,12 @@ export default function Doorstep() {
             )}
 
             <div className={view === "grid" ? "item-grid" : "item-list"}>
-              {visible.map((item) => {
+              {visible.map((item, index) => {
                 const remaining = item.expiresAt - now;
                 const urgent = remaining < 15 * 60 * 1000;
+                /* under an hour is worth a quieter warning than the urgent
+                   pulse — the chip turns signal yellow but holds still */
+                const soon = remaining < 60 * 60 * 1000;
                 const pct = Math.max(0, Math.min(100, (remaining / item.windowMs) * 100));
                 const mine = item.status === "yours";
                 const gone = item.status === "taken";
@@ -4964,9 +4967,13 @@ export default function Doorstep() {
 
                 if (view === "grid") {
                   return (
+                    // the card's position feeds its entrance stagger via the
+                    // --i custom property; capped at six so late arrivals in a
+                    // long feed never sit around waiting for their turn
                     <article
                       key={item.id}
                       className={`gcard ${urgent && !gone ? "urgent" : ""} ${gone && !item.owner ? "taken" : ""}`}
+                      style={{ "--i": Math.min(index, 6) }}
                       onClick={open}
                     >
                       <div className="gcard-photo">
@@ -4992,7 +4999,7 @@ export default function Doorstep() {
                             </svg>
                           </button>
                         )}
-                        <span className={`gcard-timer ${item.lastOrders ? "last-orders" : urgent ? "urgent" : ""}`}>
+                        <span className={`gcard-timer ${item.lastOrders ? "last-orders" : urgent ? "urgent" : soon ? "soon" : ""}`}>
                           {item.lastOrders ? `Last orders · ${formatLeft(remaining)}` : formatLeft(remaining)}
                         </span>
                         {item.dist && <span className="gcard-dist">{item.dist}</span>}
@@ -5016,9 +5023,12 @@ export default function Doorstep() {
                 }
 
                 return (
+                  // list rows share the grid's staggered entrance so switching
+                  // views never changes how the feed feels when it arrives
                   <article
                     key={item.id}
                     className={`card ${urgent && !gone ? "urgent" : ""} ${gone && !item.owner ? "taken" : ""}`}
+                    style={{ "--i": Math.min(index, 6) }}
                     onClick={open}
                   >
                     <div className="card-body">
