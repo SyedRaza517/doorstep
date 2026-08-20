@@ -1586,3 +1586,32 @@ test("the regex bans fire before the AI layer, so a car seat is refused even wit
   assert.match(banned.body.error, /car seats, cot mattresses/, "the refusal must come from the regex layer, not the AI");
   assert.equal(banned.body.field, "title");
 });
+
+test("chat reply suggestions degrade to nothing without a key", async () => {
+  const giver = await newNeighbour("Suggesting Giver");
+  const claimer = await newNeighbour("Suggesting Claimer");
+  const stranger = await newNeighbour("Passing Stranger");
+
+  const created = await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Wobbly bookcase", cat: "Furniture", road: "Test Road, E8", address: "2 Test Road, London E8 3EP", spot: "porch" },
+  });
+  assert.equal(created.status, 201);
+  const claimed = await call(`/items/${created.body.id}/claim`, { method: "POST", token: claimer });
+  assert.equal(claimed.status, 200);
+  const convId = claimed.body.conversationId;
+  assert.ok(convId, "claiming opens the arrangement thread");
+
+  /* the test environment has no AI key, so the endpoint must answer with a
+     polite nothing rather than an error — the client's fixed chips are the
+     designed fallback, and a chat must never look broken over a missing key */
+  const suggested = await call(`/chats/${convId}/suggest`, { token: claimer });
+  assert.equal(suggested.status, 200);
+  assert.equal(suggested.body.replies, null);
+
+  /* the same participant check as reading the thread: a stranger learns
+     nothing, not even that the conversation exists */
+  const nosy = await call(`/chats/${convId}/suggest`, { token: stranger });
+  assert.equal(nosy.status, 404);
+});

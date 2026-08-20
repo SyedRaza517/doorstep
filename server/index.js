@@ -17,7 +17,7 @@ import { geocodePostcode, milesBetween, formatMiles, approxCoords, FALLBACK } fr
 import { lookupPostcode, hasAddressProvider } from "./address.js";
 import { areaFor } from "./geo.js";
 import { rainOutlook, rainWarning } from "./weather.js";
-import { aiConfigured, understand } from "./ai.js";
+import { aiConfigured, understand, suggestReplies } from "./ai.js";
 import { specFromPhoto, hasCredentials } from "./autospec.js";
 import { checkListing, hasCredentials as hasModerationCredentials } from "./moderate.js";
 import { impactFor } from "./impact.js";
@@ -1935,6 +1935,45 @@ app.get(
         createdAt: num(m.created_at),
       })),
     });
+  })
+);
+
+/* Situational quick replies: three things this person might plausibly say
+   next, written for the live thread rather than picked from the fixed set.
+   When no AI credential is configured the answer is a 200 with replies null,
+   not an error — an absent key is a normal state of the world, and the
+   client quietly keeps its fixed chips without ever surfacing a failure. */
+app.get(
+  "/api/chats/:id/suggest",
+  auth,
+  wrap(async (req, res) => {
+    const conv = await one("SELECT * FROM conversations WHERE id = $1", [req.params.id]);
+    if (!conv || (num(conv.giver_id) !== req.user.id && num(conv.claimer_id) !== req.user.id))
+      return fail(res, 404, "No such conversation");
+
+    if (!aiConfigured) return res.json({ replies: null });
+
+    /* the final eight messages are plenty of context for "what would I say
+       next", and keep the call cheap; nothing is cached because the right
+       suggestion changes with every message that lands */
+    const msgs = await query("SELECT * FROM messages WHERE conversation_id = $1 ORDER BY id ASC LIMIT 200", [conv.id]);
+    const item = await one("SELECT title FROM items WHERE id = $1", [conv.item_id]);
+    try {
+      const replies = await suggestReplies({
+        role: num(conv.giver_id) === req.user.id ? "giving" : "collecting",
+        title: item ? item.title : "",
+        messages: msgs.slice(-8).map((m) => ({
+          system: m.sender_id == null,
+          mine: m.sender_id != null && num(m.sender_id) === req.user.id,
+          body: m.body,
+        })),
+      });
+      res.json({ replies });
+    } catch {
+      /* the fixed chips are always good enough — an AI hiccup must never
+         break a chat, so any failure degrades to the same quiet null */
+      res.json({ replies: null });
+    }
   })
 );
 

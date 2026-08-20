@@ -692,6 +692,10 @@ export default function Doorstep() {
   const [sky, setSky] = useState(null);
   const [wants, setWants] = useState([]);
   const [draft, setDraft] = useState("");
+  /* situational quick-reply chips written by the server's AI for the open
+     thread; null means "use the fixed set", which is also the graceful
+     answer whenever AI is unconfigured or unwell */
+  const [aiChips, setAiChips] = useState(null);
   const chatEnd = useRef(null);
   const [reporting, setReporting] = useState(null);
   const [editing, setEditing] = useState(null);
@@ -846,6 +850,9 @@ export default function Doorstep() {
         api("/chats", { token }).then((d) => { setChats(d.chats); setChatUnread(d.unread); }).catch(() => {});
         if (screenRef.current === "chat" && chatIdRef.current) {
           api(`/chats/${chatIdRef.current}`, { token }).then(setThread).catch(() => {});
+          /* their message changed the conversation, so the chips should
+             answer it — refresh them alongside the thread itself */
+          api(`/chats/${chatIdRef.current}/suggest`, { token }).then((d) => setAiChips(d.replies)).catch(() => {});
         } else {
           setToast(msg.body.length > 60 ? `${msg.body.slice(0, 60)}…` : msg.body);
         }
@@ -984,6 +991,11 @@ export default function Doorstep() {
         /* opening it read it, so the badge can let go of those */
         api("/chats", { token }).then((x) => setChatUnread(x.unread)).catch(() => {});
       }).catch(() => {});
+      /* clear before asking so a slow answer for the last thread can never
+         dress this one; each open is a fresh ask because the right thing to
+         say depends entirely on what has just been said */
+      setAiChips(null);
+      api(`/chats/${chatId}/suggest`, { token }).then((d) => setAiChips(d.replies)).catch(() => setAiChips(null));
     }
     if (screen === "profile") api("/blocks", { token }).then((d) => setBlocked(d.blocked)).catch(() => {});
     if (screen === "give") {
@@ -3280,13 +3292,18 @@ export default function Doorstep() {
       setThread((t) => ({ ...t, messages: [...t.messages, { id: `tmp-${Date.now()}`, mine: true, body, createdAt: Date.now() }] }));
       try {
         await api(`/chats/${thread.id}`, { method: "POST", token, body: { body } });
+        /* what's worth saying next changed the moment this landed, so ask
+           again — fire-and-forget, the old chips stand until better arrive */
+        api(`/chats/${thread.id}/suggest`, { token }).then((d) => setAiChips(d.replies)).catch(() => {});
       } catch (e) {
         setToast(e.message);
       }
     };
-    const QUICK = thread && thread.role === "collecting"
+    /* AI-written chips fit the actual conversation, so they win when present;
+       the fixed set is the ever-reliable fallback for everyone else */
+    const QUICK = (aiChips && aiChips.length ? aiChips : thread && thread.role === "collecting"
       ? ["On my way now", "Running 10 minutes late — still coming", "Which house number is it?", "Got it — thank you!"]
-      : ["It's outside the front door", "No rush — it'll be there", "Buzz flat when you arrive", "Glad it's going to a good home"];
+      : ["It's outside the front door", "No rush — it'll be there", "Buzz flat when you arrive", "Glad it's going to a good home"]);
 
     return (
       <SubScreen
@@ -3344,7 +3361,7 @@ export default function Doorstep() {
               </div>
             )}
 
-            <div className="quick-row">
+            <div className={`quick-row${aiChips && aiChips.length ? " live" : ""}`}>
               {QUICK.map((qr) => (
                 <button key={qr} className="quick-chip" onClick={() => sendMsg(qr)}>
                   {qr}

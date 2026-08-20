@@ -4184,3 +4184,11 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
   -webkit-box-orient: vertical;
 }
 .spec-choice.none { border-style: dashed; background: transparent; }
+
+/* ---------- situational quick replies ----------
+   When the chips were written for this very conversation rather than picked
+   from the fixed set, each carries a sliver of signal yellow down its left
+   edge — enough of a tell for the curious, without shouting "AI" at anyone. */
+.quick-row.live .quick-chip {
+  border-left: 2px solid var(--signal);
+}
