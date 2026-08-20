@@ -28,22 +28,31 @@ export function formatMiles(mi) {
    { ok: false, reason: "offline" }  — network/API failure, caller decides */
 export async function geocodePostcode(postcode) {
   const clean = String(postcode).trim().toUpperCase().replace(/\s+/g, "");
-  const cached = await one("SELECT lat, lng FROM postcode_cache WHERE postcode = $1", [clean]);
-  if (cached) return { ok: true, lat: cached.lat, lng: cached.lng };
+  const cached = await one("SELECT lat, lng, city, county, country FROM postcode_cache WHERE postcode = $1", [clean]);
+  if (cached && cached.city != null)
+    return { ok: true, lat: cached.lat, lng: cached.lng, city: cached.city, county: cached.county, country: cached.country };
 
   try {
     const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(clean)}`);
     if (res.status === 404) return { ok: false, reason: "invalid" };
     if (!res.ok) return { ok: false, reason: "offline" };
     const data = await res.json();
-    const lat = data.result.latitude;
-    const lng = data.result.longitude;
+    const r = data.result;
+    const lat = r.latitude;
+    const lng = r.longitude;
+    /* the postcode already knows its place: a London borough files as
+       city London, county Hackney; elsewhere the district is the town and
+       the county is the county — nobody should have to type any of it */
+    const isLondon = r.region === "London";
+    const city = isLondon ? "London" : r.admin_district || "";
+    const county = isLondon ? r.admin_district || "Greater London" : r.admin_county || r.region || "";
+    const country = r.country || "United Kingdom";
     await query(
-      `INSERT INTO postcode_cache (postcode, lat, lng) VALUES ($1,$2,$3)
-       ON CONFLICT (postcode) DO UPDATE SET lat = EXCLUDED.lat, lng = EXCLUDED.lng`,
-      [clean, lat, lng]
+      `INSERT INTO postcode_cache (postcode, lat, lng, city, county, country) VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (postcode) DO UPDATE SET lat = EXCLUDED.lat, lng = EXCLUDED.lng, city = EXCLUDED.city, county = EXCLUDED.county, country = EXCLUDED.country`,
+      [clean, lat, lng, city, county, country]
     );
-    return { ok: true, lat, lng };
+    return { ok: true, lat, lng, city, county, country };
   } catch {
     return { ok: false, reason: "offline" };
   }

@@ -97,5 +97,8 @@ export async function lookupPostcode(postcode) {
     road,
     lat: geo.lat,
     lng: geo.lng,
+    city: geo.city || "",
+    county: geo.county || "",
+    country: geo.country || "",
   };
 }

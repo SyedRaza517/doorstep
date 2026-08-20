@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { App as CapacitorApp } from "@capacitor/app";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "./styles.css";
@@ -632,9 +633,14 @@ export default function Doorstep() {
   const [form, setForm] = useState({ name: "", email: "", postcode: "", password: "", confirm: "" });
   /* what the postcode turned into: the street we found, the houses to pick
      from if a licensed lookup is configured, and what they chose */
-  const [addr, setAddr] = useState({ state: "idle", road: null, options: [], picked: null, house: "" });
+  const [addr, setAddr] = useState({ state: "idle", road: null, options: [], picked: null, house: "", city: "", county: "", country: "" });
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
+  /* two eyes and a signature: what you typed, on request, and your yes to
+     the privacy policy recorded as part of the signup itself */
+  const [showPw, setShowPw] = useState(false);
+  const [showPw2, setShowPw2] = useState(false);
+  const [acceptPolicy, setAcceptPolicy] = useState(false);
   const [filter, setFilter] = useState("Going soonest");
   const [typeFilter, setTypeFilter] = useState("all");
   const [q, setQ] = useState("");
@@ -871,6 +877,54 @@ export default function Doorstep() {
   useEffect(() => { screenRef.current = screen; }, [screen]);
   useEffect(() => { chatIdRef.current = chatId; }, [chatId]);
 
+  /* sheets need the same treatment: the hardware back should close what's
+     on top before it moves between screens */
+  const sheetRef = useRef({ thanking: null, reporting: null });
+  useEffect(() => { sheetRef.current = { thanking, reporting }; }, [thanking, reporting]);
+
+  /* Android's own back button drives the same navigation the on-screen Back
+     does. Without this the system gesture killed the whole app from any
+     screen — the one habit every Android thumb has, broken. On the web the
+     listener simply never fires. Home is the floor: back from there hands
+     control to the system, which minimises the app the way Android expects. */
+  useEffect(() => {
+    const sub = CapacitorApp.addListener("backButton", () => {
+      const sheet = sheetRef.current;
+      if (sheet.thanking) return setThanking(null);
+      if (sheet.reporting) return setReporting(null);
+
+      const here = screenRef.current;
+      const upFrom = {
+        detail: "home",
+        map: "home",
+        give: "home",
+        spot: "home",
+        notifications: "home",
+        profile: "home",
+        wishes: "home",
+        impact: "home",
+        fallback: "home",
+        auth: "home",
+        chat: "chats",
+        chats: "profile",
+        mine: "profile",
+        radar: "profile",
+      };
+      if (upFrom[here]) {
+        if (here === "chat") {
+          setThread(null);
+          setChatId(null);
+        }
+        setScreen(upFrom[here]);
+      } else {
+        CapacitorApp.exitApp();
+      }
+    });
+    return () => {
+      sub.then((h) => h.remove()).catch(() => {});
+    };
+  }, []);
+
   /* unread count on sign-in */
   useEffect(() => {
     if (!token || !user) return;
@@ -1085,9 +1139,14 @@ export default function Doorstep() {
         options: found.addresses || [],
         picked: null,
         house: "",
+        /* the postcode already knows where it lives — these arrive filled
+           in, and stay editable for the rare case the data is stale */
+        city: found.city || "",
+        county: found.county || "",
+        country: found.country || "",
       });
     } catch (e) {
-      setAddr({ state: "idle", road: null, options: [], picked: null, house: "" });
+      setAddr({ state: "idle", road: null, options: [], picked: null, house: "", city: "", county: "", country: "" });
       setErrors((prev) => ({ ...prev, postcode: e.message }));
     }
   };
@@ -1115,6 +1174,7 @@ export default function Doorstep() {
       if (!form.confirm) next.confirm = "Type your password again";
       else if (form.confirm !== form.password) next.confirm = "These don't match";
     }
+    if (signup && !acceptPolicy) next.privacy = "Have a read, then tick the box";
 
     setErrors(next);
     if (Object.keys(next).length > 0) return;
@@ -1132,6 +1192,10 @@ export default function Doorstep() {
               address: addressLine(),
               road: (addr.picked && addr.picked.road) || addr.road || "",
               uprn: (addr.picked && addr.picked.id) || null,
+              city: addr.city,
+              county: addr.county,
+              country: addr.country,
+              acceptPrivacy: acceptPolicy,
             }
           : { email: form.email, password: form.password },
       });
@@ -2064,7 +2128,7 @@ export default function Doorstep() {
                       onChange={(e) => {
                         set("postcode")(e);
                         /* changing the postcode invalidates whatever was found for the old one */
-                        setAddr({ state: "idle", road: null, options: [], picked: null, house: "" });
+                        setAddr({ state: "idle", road: null, options: [], picked: null, house: "", city: "", county: "", country: "" });
                       }}
                       onKeyDown={(e) => e.key === "Enter" && findAddress()}
                       placeholder="E8 3EP"
@@ -2113,6 +2177,23 @@ export default function Doorstep() {
                     </div>
                   )}
 
+                  {(addr.state === "street" || addr.state === "choose") && (
+                    <div className="place-grid">
+                      <div className="field">
+                        <label htmlFor="ds-city">City</label>
+                        <input id="ds-city" value={addr.city} onChange={(e) => setAddr((a) => ({ ...a, city: e.target.value }))} autoComplete="address-level2" />
+                      </div>
+                      <div className="field">
+                        <label htmlFor="ds-county">County</label>
+                        <input id="ds-county" value={addr.county} onChange={(e) => setAddr((a) => ({ ...a, county: e.target.value }))} autoComplete="address-level1" />
+                      </div>
+                      <div className="field">
+                        <label htmlFor="ds-country">Country</label>
+                        <input id="ds-country" value={addr.country} onChange={(e) => setAddr((a) => ({ ...a, country: e.target.value }))} autoComplete="country-name" />
+                      </div>
+                    </div>
+                  )}
+
                   {(addr.picked || (addr.state === "street" && addr.house.trim())) && (
                     <p className="addr-done">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -2136,28 +2217,59 @@ export default function Doorstep() {
 
               <div className={`field ${errors.password ? "bad" : ""}`}>
                 <label htmlFor="ds-password">Password</label>
-                <input id="ds-password" type="password" value={form.password} onChange={set("password")} onKeyDown={onKey} placeholder={signup ? "At least 8 characters" : "Your password"} autoComplete={signup ? "new-password" : "current-password"} />
+                <div className="pw-wrap">
+                  <input id="ds-password" type={showPw ? "text" : "password"} value={form.password} onChange={set("password")} onKeyDown={onKey} placeholder={signup ? "At least 8 characters" : "Your password"} autoComplete={signup ? "new-password" : "current-password"} />
+                  <button type="button" className="pw-eye" aria-label={showPw ? "Hide password" : "Show password"} aria-pressed={showPw} onClick={() => setShowPw((v) => !v)}>
+                    {showPw ? <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17.9 17.9A10.6 10.6 0 0 1 12 19c-6.5 0-10-7-10-7a17.7 17.7 0 0 1 4.1-4.9M9.9 5.2A9.9 9.9 0 0 1 12 5c6.5 0 10 7 10 7a17.8 17.8 0 0 1-2.2 3.1" /><path d="M3 3l18 18" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /></svg> : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>}
+                  </button>
+                </div>
                 {errors.password && <p className="field-note">{errors.password}</p>}
               </div>
 
               {signup && (
                 <div className={`field ${errors.confirm ? "bad" : ""}`}>
                   <label htmlFor="ds-confirm">Confirm password</label>
+                  <div className="pw-wrap">
                   <input
                     id="ds-confirm"
-                    type="password"
+                    type={showPw2 ? "text" : "password"}
                     value={form.confirm}
                     onChange={set("confirm")}
                     onKeyDown={onKey}
                     placeholder="Type it again"
                     autoComplete="new-password"
                   />
+                  <button type="button" className="pw-eye" aria-label={showPw2 ? "Hide password" : "Show password"} aria-pressed={showPw2} onClick={() => setShowPw2((v) => !v)}>
+                    {showPw2 ? <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17.9 17.9A10.6 10.6 0 0 1 12 19c-6.5 0-10-7-10-7a17.7 17.7 0 0 1 4.1-4.9M9.9 5.2A9.9 9.9 0 0 1 12 5c6.5 0 10 7 10 7a17.8 17.8 0 0 1-2.2 3.1" /><path d="M3 3l18 18" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /></svg> : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>}
+                  </button>
+                  </div>
                   {errors.confirm && <p className="field-note">{errors.confirm}</p>}
                   {!errors.confirm && form.confirm && form.confirm === form.password && form.password.length >= 8 && (
                     <p className="field-ok">Passwords match</p>
                   )}
                 </div>
               )}
+
+              {signup && (
+                <label className={`consent-row ${errors.privacy ? "bad" : ""}`}>
+                  <input
+                    type="checkbox"
+                    checked={acceptPolicy}
+                    onChange={(e) => {
+                      setAcceptPolicy(e.target.checked);
+                      setErrors((prev) => (prev.privacy ? { ...prev, privacy: null } : prev));
+                    }}
+                  />
+                  <span>
+                    I've read the{" "}
+                    <button type="button" className="policy-link" onClick={() => setScreen("privacy")}>
+                      privacy policy
+                    </button>{" "}
+                    — what Doorstep holds about me, and why
+                  </span>
+                </label>
+              )}
+              {signup && errors.privacy && <p className="field-note">{errors.privacy}</p>}
 
               {!signup && (
                 <div className="rule-card">
@@ -3130,6 +3242,91 @@ export default function Doorstep() {
     );
   }
 
+  /* ---------------- privacy ---------------- */
+
+  if (screen === "privacy") {
+    return (
+      <SubScreen title="Privacy" time={timeNow} toast={toast} onBack={() => setScreen(token ? "profile" : "auth")}>
+        <div className="policy">
+          <p className="sub-lede">
+            Written to be read, not scrolled past. This is everything Doorstep holds about you, why it
+            holds it, and who else is involved. Doorstep is operated by TwelveTech Systems Limited.
+          </p>
+
+          <p className="sub-head">What we collect, and why</p>
+          <p>
+            <b>Your name.</b> Neighbours see your first name only — on your listings, in the
+            arrangement thread, and beside your record.
+          </p>
+          <p>
+            <b>Your email address.</b> Used to sign you in and for nothing else. It is never shown to
+            neighbours and never sold or shared for marketing.
+          </p>
+          <p>
+            <b>Your password.</b> Stored only as a salted scrypt hash. We cannot read it, and neither
+            can anyone who steals the database.
+          </p>
+          <p>
+            <b>Your postcode, and the address you give at signup.</b> Your postcode becomes coordinates
+            so distances are honest. Your house number and street are shown to exactly one person: a
+            neighbour who has claimed something from you, for the half hour they are on their way.
+            Everyone else sees your area ("London Fields") and a map pin blurred to roughly a street
+            block. In the final half hour of an unclaimed listing the pin sharpens so passers-by can
+            find it — the written address stays hidden even then. City, county and country are kept so
+            your address is complete when it is shown to a claimer.
+          </p>
+          <p>
+            <b>What you list, wish for, save, spot and say.</b> Listings and their photos, your wish
+            list, saved items, kerbside piles you post, messages in arrangement threads, ratings you
+            give and receive, thank-yous, follows, and reports or blocks you make. This is the product
+            working, not profiling: none of it is used for advertising, and there is no advertising.
+          </p>
+          <p>
+            <b>What we work out.</b> Distances between you and listings, your given and collected
+            counts, badges, no-show strikes, and the neighbourhood's waste-diversion figures — all
+            derived from the activity above.
+          </p>
+
+          <p className="sub-head">Who else touches the data</p>
+          <p>
+            The database is hosted by <b>Supabase</b>, the API by <b>Render</b>, and the web app by{" "}
+            <b>Vercel</b> — they store and move the data on our instructions and for no purpose of
+            their own. Your postcode alone is sent to <b>postcodes.io</b> to find its coordinates;
+            coordinates alone go to <b>OpenStreetMap's Nominatim</b> to name your street and to{" "}
+            <b>Open-Meteo</b> to check for rain. If photo auto-fill is enabled, the photo you take is
+            sent to <b>Anthropic</b> to draft the listing and is not used to train models. No analytics
+            trackers, no ad networks, no data brokers.
+          </p>
+
+          <p className="sub-head">How long we keep it</p>
+          <p>
+            While your account exists. Arrangement threads close 48 hours after a handover and their
+            purpose ends with them. Notifications age out of view after your most recent forty.
+          </p>
+
+          <p className="sub-head">Your rights</p>
+          <p>
+            Under UK GDPR you can have a copy of everything (<b>Download my data</b>, on your profile —
+            it arrives as a file, immediately), and you can leave (<b>Delete my account</b>, same
+            place). Deletion is immediate and real: your name becomes "Former neighbour", your email,
+            address and coordinates are erased, your sessions are revoked, and your wishes, messages,
+            saves and follows are deleted. Collected items stay counted — anonymously — so the
+            neighbourhood's diversion figures stay true, and any line you added to an item's story
+            stays with the item, without your name. You can also complain to the ICO
+            (ico.org.uk) — though we would rather you told us first.
+          </p>
+
+          <p className="sub-head">Questions</p>
+          <p>
+            Contact TwelveTech Systems Limited through the email address on our app-store listing.
+            This policy changes only when the app's behaviour changes, and the signup screen always
+            links to the current version.
+          </p>
+        </div>
+      </SubScreen>
+    );
+  }
+
   /* ---------------- the demand radar ---------------- */
 
   if (screen === "radar") {
@@ -3491,6 +3688,10 @@ export default function Doorstep() {
                 <button onClick={exportData}>
                   Download my data
                   <span>Everything we hold about you, as a file</span>
+                </button>
+                <button onClick={() => setScreen("privacy")}>
+                  Privacy policy
+                  <span>What we hold, why, and who else is involved — in plain words</span>
                 </button>
               </div>
 

@@ -4015,3 +4015,61 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
   border-color: var(--railing);
   box-shadow: 0 8px 24px rgba(15, 30, 24, 0.16), 0 0 0 3px rgba(35, 74, 59, 0.25);
 }
+
+/* city, county, country — filled in by the postcode, editable by the person */
+.place-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 10px;
+  margin-top: 10px;
+}
+.place-grid .field:last-child { grid-column: 1 / -1; }
+.place-grid .field { margin-bottom: 10px; }
+
+/* ---------- password eyes and the privacy signature ---------- */
+.pw-wrap { position: relative; }
+.pw-wrap input { width: 100%; padding-right: 44px; }
+.pw-eye {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(35, 74, 59, 0.55);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.pw-eye:hover { color: var(--railing); }
+
+.consent-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  margin: 4px 0 12px;
+  cursor: pointer;
+}
+.consent-row input { width: 18px; height: 18px; flex: none; margin-top: 1px; accent-color: var(--railing); }
+.consent-row.bad span { color: var(--brick); }
+.policy-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--railing);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* the policy reads like a letter, not a legal wall */
+.policy p { font-size: 13.5px; line-height: 1.6; color: var(--ink); margin: 0 0 10px; }
+.policy .sub-head { margin: 18px 0 8px; }
+.policy b { color: var(--railing); }

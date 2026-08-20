@@ -657,7 +657,22 @@ app.get(
 app.post(
   "/api/auth/signup",
   wrap(async (req, res) => {
-    const { name = "", email = "", postcode = "", password = "", address = "", road = "", uprn = null } = req.body || {};
+    const {
+      name = "",
+      email = "",
+      postcode = "",
+      password = "",
+      address = "",
+      road = "",
+      uprn = null,
+      city = "",
+      county = "",
+      country = "",
+      acceptPrivacy = false,
+    } = req.body || {};
+    /* consent is a fact with a timestamp, not a checkbox that vanishes */
+    if (acceptPrivacy !== true)
+      return fail(res, 400, "Please read and accept the privacy policy first", "privacy");
     if (!name.trim()) return fail(res, 400, "Tell us what to call you", "name");
     if (!EMAIL_RE.test(email)) return fail(res, 400, "That email doesn't look right", "email");
     if (!POSTCODE_RE.test(postcode.trim())) return fail(res, 400, "Enter a full UK postcode, like E8 3EP", "postcode");
@@ -678,8 +693,8 @@ app.post(
     const level = uprn ? "uprn" : String(address).trim() ? "postcode" : "none";
 
     const row = await one(
-      `INSERT INTO users (name, email, postcode, password_hash, created_at, lat, lng, address, road, uprn, address_verified)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      `INSERT INTO users (name, email, postcode, password_hash, created_at, lat, lng, address, road, uprn, address_verified, city, county, country, privacy_accepted_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
       [
         name.trim(),
         foldEmail(email),
@@ -692,6 +707,12 @@ app.post(
         String(road).trim() || null,
         uprn ? String(uprn) : null,
         level,
+        /* typed or derived — either way the postcode's own answer is the
+           fallback, so nobody is forced to spell out where London is */
+        String(city).trim() || (geo.ok && geo.city) || null,
+        String(county).trim() || (geo.ok && geo.county) || null,
+        String(country).trim() || (geo.ok && geo.country) || null,
+        Date.now(),
       ]
     );
     res.status(201).json(await startSession(castUser(row)));
@@ -813,6 +834,9 @@ app.get(
         spot,
         away: req.user.away_until != null && num(req.user.away_until) > now,
         area: areaFor(postcode),
+        city: req.user.city || null,
+        county: req.user.county || null,
+        country: req.user.country || null,
       },
       badges: badgeShelf({ given: num(given.n), collected: num(collected.n), thanks: num(thanked.n) }),
       stats: {

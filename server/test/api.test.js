@@ -37,7 +37,7 @@ const newNeighbour = async (name) =>
   (
     await call("/auth/signup", {
       method: "POST",
-      body: { name, email: `t${Date.now()}${Math.round(performance.now())}@test.uk`, postcode: "E8 3EP", password: "password99" },
+      body: { name, email: `t${Date.now()}${Math.round(performance.now())}@test.uk`, postcode: "E8 3EP", password: "password99", acceptPrivacy: true },
     })
   ).body.token;
 
@@ -65,7 +65,7 @@ after(() => {
 });
 
 test("the seeded demo account signs in and a wrong password does not", async () => {
-  const ok = await call("/auth/signin", { method: "POST", body: { email: "demo@doorstep.uk", password: "doorstep123" } });
+  const ok = await call("/auth/signin", { method: "POST", body: { email: "demo@doorstep.uk", password: "doorstep123", acceptPrivacy: true } });
   assert.equal(ok.status, 200);
   assert.match(ok.body.token, /^[0-9a-f]{64}$/);
 
@@ -77,7 +77,7 @@ test("the seeded demo account signs in and a wrong password does not", async () 
 test("signup refuses a duplicate email", async () => {
   const res = await call("/auth/signup", {
     method: "POST",
-    body: { name: "Impostor", email: "demo@doorstep.uk", postcode: "E8 3EP", password: "password99" },
+    body: { name: "Impostor", email: "demo@doorstep.uk", postcode: "E8 3EP", password: "password99", acceptPrivacy: true },
   });
   assert.equal(res.status, 409);
   assert.equal(res.body.field, "email");
@@ -86,14 +86,14 @@ test("signup refuses a duplicate email", async () => {
 test("signup rejects a malformed postcode and a short password", async () => {
   const pc = await call("/auth/signup", {
     method: "POST",
-    body: { name: "A B", email: `pc${Date.now()}@test.uk`, postcode: "NOT A POSTCODE", password: "password99" },
+    body: { name: "A B", email: `pc${Date.now()}@test.uk`, postcode: "NOT A POSTCODE", password: "password99", acceptPrivacy: true },
   });
   assert.equal(pc.status, 400);
   assert.equal(pc.body.field, "postcode");
 
   const pw = await call("/auth/signup", {
     method: "POST",
-    body: { name: "A B", email: `pw${Date.now()}@test.uk`, postcode: "E8 3EP", password: "short" },
+    body: { name: "A B", email: `pw${Date.now()}@test.uk`, postcode: "E8 3EP", password: "short", acceptPrivacy: true },
   });
   assert.equal(pw.status, 400);
   assert.equal(pw.body.field, "password");
@@ -664,7 +664,7 @@ test("an address chosen at signup is kept for giving", async () => {
       name: "Addressed Neighbour",
       email: `addr${Date.now()}@test.uk`,
       postcode: "E8 3EP",
-      password: "doorstep123",
+      password: "doorstep123", acceptPrivacy: true,
       address: "12 Ellingfort Road",
       road: "Ellingfort Road",
     },
@@ -1211,7 +1211,7 @@ test("first dibs holds the door for the street", async () => {
   /* a neighbour registered far away is told when it opens, not refused outright */
   const farAway = await call("/auth/signup", {
     method: "POST",
-    body: { name: "Distant Claimer", email: `dibs${Date.now()}@x.uk`, postcode: "N16 0SS", password: "doorstep123" },
+    body: { name: "Distant Claimer", email: `dibs${Date.now()}@x.uk`, postcode: "N16 0SS", password: "doorstep123", acceptPrivacy: true },
   });
   const tried = await call(`/items/${listed.body.id}/claim`, { method: "POST", token: farAway.body.token });
   assert.equal(tried.status, 403);
@@ -1285,7 +1285,7 @@ test("the demand radar reads the wish list backwards, counts only", async () => 
   /* a wish whose radius cannot reach the giver must not count */
   const farWisher = await call("/auth/signup", {
     method: "POST",
-    body: { name: "Too Far", email: `radar${Date.now()}@x.uk`, postcode: "M1 1AE", password: "doorstep123" },
+    body: { name: "Too Far", email: `radar${Date.now()}@x.uk`, postcode: "M1 1AE", password: "doorstep123", acceptPrivacy: true },
   });
   await call("/wishes", { method: "POST", token: farWisher.body.token, body: { keyword: "gramophone", cat: "Anything", radius: 1 } });
 
