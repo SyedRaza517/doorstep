@@ -4150,3 +4150,6 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
 /* the profile rows and badge shelf read left, like sentences */
 .badge-copy, .link-copy, .badge-copy b, .link-copy > span { text-align: left; }
 .profile-links button { text-align: left; }
+
+/* the one mark every form-filler understands */
+.req { font-style: normal; color: var(--brick); font-weight: 700; }

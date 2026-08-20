@@ -435,6 +435,9 @@ const greeting = (name) => {
   return name ? `${part}, ${name.split(" ")[0]}` : `${part}, neighbour`;
 };
 
+/* the asterisk every form speaks: this one you cannot skip */
+const Req = () => <em className="req" aria-label="required">*</em>;
+
 /* "216h ago" is not something anyone says out loud */
 const agoLabel = (mins) => {
   if (mins < 60) return `${mins} min ago`;
@@ -1858,7 +1861,16 @@ export default function Doorstep() {
         next.useBy = "That date has passed — food past its use-by can't be passed on";
     }
     setGiveErrors(next);
-    if (Object.keys(next).length > 0) return;
+    if (Object.keys(next).length > 0) {
+      /* the reason you can't list must never be off-screen: jump to the
+         first thing that needs finishing and say so */
+      setToast("Nearly there — the fields marked * still need something.");
+      setTimeout(() => {
+        const bad = document.querySelector(".field.bad, .confirm-row.bad, .field-note");
+        if (bad) bad.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 60);
+      return;
+    }
 
     setBusy(true);
     try {
@@ -4036,7 +4048,7 @@ export default function Doorstep() {
               </div>
 
               <div className={`field ${giveErrors.title ? "bad" : ""}`}>
-                <label htmlFor="gv-title">What is it</label>
+                <label htmlFor="gv-title">What is it <Req /></label>
                 <input id="gv-title" value={give.title} onChange={setG("title")} placeholder="Pine bookcase" />
                 {giveErrors.title && <p className="field-note">{giveErrors.title}</p>}
                 {demand > 0 && (
@@ -4156,7 +4168,7 @@ export default function Doorstep() {
               {give.type === "food" && (
                 <>
                   <div className={`field ${giveErrors.useBy ? "bad" : ""}`}>
-                    <label htmlFor="gv-useby">Use by</label>
+                    <label htmlFor="gv-useby">Use by <Req /></label>
                     <input
                       id="gv-useby"
                       type="date"
@@ -4208,6 +4220,12 @@ export default function Doorstep() {
                     <label htmlFor={`gv-${f.key}`}>
                       {f.label}
                       {f.type === "cm" ? " (cm)" : ""}
+                      {(f.key === "condition" || (f.key === "width" && give.cat === "Furniture" && give.type !== "food")) && (
+                        <>
+                          {" "}
+                          <Req />
+                        </>
+                      )}
                     </label>
 
                     {f.type === "choice" ? (
@@ -4250,13 +4268,13 @@ export default function Doorstep() {
               {!give.wanted && (
               <>
               <div className={`field ${giveErrors.road ? "bad" : ""}`}>
-                <label htmlFor="gv-road">Road</label>
+                <label htmlFor="gv-road">Road <Req /></label>
                 <input id="gv-road" value={give.road} onChange={setG("road")} placeholder="Ellingfort Road, E8" />
                 {giveErrors.road && <p className="field-note">{giveErrors.road}</p>}
               </div>
 
               <div className={`field ${giveErrors.address ? "bad" : ""}`}>
-                <label htmlFor="gv-address">Full address — shared only with the claimer</label>
+                <label htmlFor="gv-address">Full address — shared only with the claimer <Req /></label>
                 <input id="gv-address" value={give.address} onChange={setG("address")} placeholder="14 Ellingfort Road, London E8 3PA" />
                 {giveErrors.address && <p className="field-note">{giveErrors.address}</p>}
               </div>
@@ -4306,7 +4324,9 @@ export default function Doorstep() {
                     setGiveErrors((p) => (p.confirm ? { ...p, confirm: null } : p));
                   }}
                 />
-                <span>It'll wait on my own property — doorstep, garden, porch or lobby. Never the pavement.</span>
+                <span>
+                  It'll wait on my own property — doorstep, garden, porch or lobby. Never the pavement. <Req />
+                </span>
               </label>
               )}
               {giveErrors.confirm && <p className="field-note">{giveErrors.confirm}</p>}
