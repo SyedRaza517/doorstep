@@ -4000,3 +4000,18 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
   border-radius: 50%;
   background: var(--brick);
 }
+
+/* ---------- one focus ring, not two ----------
+   The global input:focus-visible outline is right almost everywhere, but an
+   input living inside a pill already has its ring drawn on the pill — the
+   browser's rectangle inside it reads as a broken square box. The pill keeps
+   (or gains) a focus-within ring, so keyboard users lose nothing. */
+.search-row input:focus-visible,
+.composer input:focus-visible {
+  outline: none;
+}
+
+.composer:focus-within {
+  border-color: var(--railing);
+  box-shadow: 0 8px 24px rgba(15, 30, 24, 0.16), 0 0 0 3px rgba(35, 74, 59, 0.25);
+}
