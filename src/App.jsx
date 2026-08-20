@@ -31,11 +31,16 @@ async function api(path, { method = "GET", body, token } = {}) {
 /* A listing either carries its own photograph (someone uploaded it) or names
    one from the shared library (the demo neighbourhood), which the browser
    fetches once and caches. */
+/* a photo can travel as a data URL or as "ref:slug" — a pointer into the
+   photo library, so two hundred listings can share twelve pictures without
+   the feed carrying a megabyte of repeats */
+const resolveShot = (p) => (typeof p === "string" && p.startsWith("ref:") ? `${API}/photos/${p.slice(4)}` : p);
+
 const pictureOf = (item) =>
-  (item.photos && item.photos[0]) || item.photo || (item.photoRef ? `${API}/photos/${item.photoRef}` : null);
+  resolveShot((item.photos && item.photos[0]) || null) || item.photo || (item.photoRef ? `${API}/photos/${item.photoRef}` : null);
 
 const picturesOf = (item) => {
-  if (item.photos && item.photos.length) return item.photos;
+  if (item.photos && item.photos.length) return item.photos.map(resolveShot);
   if (item.photo) return [item.photo];
   return item.photoRef ? [`${API}/photos/${item.photoRef}`] : [];
 };

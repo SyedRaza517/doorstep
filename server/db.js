@@ -19,6 +19,9 @@ try {
 let PHOTO_LIB = {};
 try {
   PHOTO_LIB = JSON.parse(fs.readFileSync(path.join(here, "seed-photo-library.json"), "utf8"));
+  /* real photographs sit alongside the illustrations under real-1..real-12,
+     served by the same slug route with the same immutable caching */
+  Object.assign(PHOTO_LIB, JSON.parse(fs.readFileSync(path.join(here, "seed-real-photos.json"), "utf8")));
 } catch {}
 
 export const photoLibrary = () => PHOTO_LIB;
@@ -669,10 +672,23 @@ export async function refreshSeed() {
       (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, postcode, lat, lng, spot, photo, photos, type, use_by, portions, photo_ref, details)
       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`;
 
+    /* every listing carries five real photographs, rotated through the
+       twelve in the library so adjacent cards never show the same cover —
+       shared by reference, so the feed never carries the same bytes twice */
+    const REAL_SHOTS = 12;
+    const galleryFor = (i) => {
+      const shots = [];
+      /* a stride of five is coprime with twelve, so the five shots in any
+         gallery are always five different photographs */
+      for (let k = 0; k < 5; k++) shots.push(`ref:real-${((i * 7 + k * 5) % REAL_SHOTS) + 1}`);
+      return shots;
+    };
+
     for (const [i, c] of CATALOGUE.entries()) {
       const coords = await geocodeSeed(c.postcode);
       const windowMs = (c.windowHours || 2) * 60 * 60 * 1000;
       const expires = now + c.minutesLeft * 60 * 1000;
+      const gallery = galleryFor(i);
       await query(insert, [
         giverIds[i % giverIds.length],
         c.title,
@@ -689,11 +705,11 @@ export async function refreshSeed() {
         coords.lng,
         c.spot,
         null,
-        "[]",
+        JSON.stringify(gallery),
         c.type,
         c.type === "food" ? now + c.useByDays * 24 * 60 * 60 * 1000 : null,
         c.type === "food" ? c.portions : 1,
-        c.photo,
+        gallery[0].slice(4),
         JSON.stringify(detailsFor(c)),
       ]);
     }
@@ -754,7 +770,7 @@ export async function refreshSeed() {
         taker,
         at,
         at,
-        g.pic,
+        `real-${(i % 12) + 1}`,
         g.type || "nonfood",
       ]
     );
