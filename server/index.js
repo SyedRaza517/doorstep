@@ -1821,6 +1821,7 @@ app.get(
               gu.name AS giver_name, cu.name AS claimer_name,
               (SELECT body FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_body,
               (SELECT created_at FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_at,
+              (SELECT m.sender_id = $1 FROM messages m WHERE m.conversation_id = c.id AND m.sender_id IS NOT NULL ORDER BY m.id DESC LIMIT 1) AS last_mine,
               (SELECT COUNT(*) FROM messages m
                  WHERE m.conversation_id = c.id AND m.read_at IS NULL
                    AND m.sender_id IS NOT NULL AND m.sender_id <> $1) AS unread
@@ -1846,6 +1847,7 @@ app.get(
           role: giving ? "giving" : "collecting",
           lastBody: c.last_body || "",
           lastAt: num(c.last_at || c.created_at),
+          lastMine: c.last_mine === true,
           unread: num(c.unread),
           done: c.collected_at != null,
         };

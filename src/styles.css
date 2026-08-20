@@ -4073,3 +4073,80 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
 .policy p { font-size: 13.5px; line-height: 1.6; color: var(--ink); margin: 0 0 10px; }
 .policy .sub-head { margin: 18px 0 8px; }
 .policy b { color: var(--railing); }
+
+/* ---------- chats, worn like a messenger ----------
+   The list reads like the apps people already live in: round picture, bold
+   name, greyed preview, time on the right, a green count where something
+   waits. The little arrow on the picture says which way the kindness went. */
+
+.chat-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+  background: rgba(35, 74, 59, 0.08);
+  border-radius: 999px;
+  padding: 4px;
+}
+.chat-tabs button {
+  flex: 1;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  font-family: var(--body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--hush);
+  padding: 8px 4px;
+  cursor: pointer;
+}
+.chat-tabs button[aria-selected="true"] {
+  background: var(--railing);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(20, 38, 31, 0.25);
+}
+
+.chat-pic { position: relative; border-radius: 50%; }
+.chat-pic img { border-radius: 50%; }
+.chat-initial {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 18px;
+  color: #fff;
+  background: var(--railing);
+  border-radius: 50%;
+}
+.chat-role {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--card);
+}
+.chat-role.giving { background: var(--signal); color: var(--ink); }
+.chat-role.collecting { background: var(--railing); color: #fff; }
+
+.chat-row { border-radius: 18px; }
+.chat-row.unread { background: rgba(245, 197, 24, 0.07); }
+.chat-lines small.loud { color: var(--ink); font-weight: 600; }
+.chat-side small.loud { color: var(--railing); font-weight: 700; }
+.chat-done {
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(35, 74, 59, 0.45);
+}
+
+/* the profile rows and badge shelf read left, like sentences */
+.badge-copy, .link-copy, .badge-copy b, .link-copy > span { text-align: left; }
+.profile-links button { text-align: left; }

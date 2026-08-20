@@ -677,6 +677,7 @@ export default function Doorstep() {
   /* the arrangement threads: the list, the open one, and what's unread */
   const [chats, setChats] = useState([]);
   const [chatUnread, setChatUnread] = useState(0);
+  const [chatTab, setChatTab] = useState("all");
   const [chatId, setChatId] = useState(null);
   const [thread, setThread] = useState(null);
   const [hands, setHands] = useState([]);
@@ -3090,16 +3091,46 @@ export default function Doorstep() {
   /* ---------------- messages ---------------- */
 
   if (screen === "chats") {
+    const shown = chats.filter((c) =>
+      chatTab === "unread" ? c.unread > 0 : chatTab === "sent" ? c.lastMine : true
+    );
+    const when = (ms) => {
+      const d = new Date(ms);
+      const today = new Date().toDateString() === d.toDateString();
+      if (today) return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+      const days = Math.round((Date.now() - ms) / 86400000);
+      if (days === 1) return "yesterday";
+      if (days < 7) return d.toLocaleDateString("en-GB", { weekday: "short" });
+      return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    };
+
     return (
-      <SubScreen title="Messages" time={timeNow} toast={toast} onBack={() => setScreen("home")}>
-        {chats.length === 0 && (
+      <SubScreen title="Chats" time={timeNow} toast={toast} onBack={() => setScreen("home")}>
+        <div className="chat-tabs" role="tablist" aria-label="Filter conversations">
+          {[
+            { k: "all", label: "All" },
+            { k: "unread", label: `Unread${chatUnread > 0 ? ` (${chatUnread > 9 ? "9+" : chatUnread})` : ""}` },
+            { k: "sent", label: "Sent" },
+          ].map((t) => (
+            <button key={t.k} role="tab" aria-selected={chatTab === t.k} onClick={() => setChatTab(t.k)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {shown.length === 0 && (
           <div className="wish-empty">
             <img src={`${API}/photos/armchair`} alt="" />
-            <b>No conversations yet</b>
-            <span>Claim something, or have something claimed, and the thread to arrange the handover starts itself.</span>
+            <b>{chatTab === "unread" ? "Nothing unread" : chatTab === "sent" ? "Nothing waiting on a reply" : "No conversations yet"}</b>
+            <span>
+              {chatTab === "all"
+                ? "Claim something, or have something claimed, and the thread to arrange the handover starts itself."
+                : "All caught up. That's the good kind of empty."}
+            </span>
           </div>
         )}
-        {chats.map((c) => (
+
+        {shown.map((c) => (
           <button
             key={c.id}
             className={`chat-row ${c.unread > 0 ? "unread" : ""}`}
@@ -3112,19 +3143,25 @@ export default function Doorstep() {
               {c.photoRef || c.photo ? (
                 <img src={c.photo || `${API}/photos/${c.photoRef}`} alt="" loading="lazy" />
               ) : (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 8h14l-1.2 11.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z" /><path d="M9 8V6a3 3 0 0 1 6 0v2" /></svg>
+                <span className="chat-initial">{c.with.slice(0, 1).toUpperCase()}</span>
               )}
+              <i className={`chat-role ${c.role}`} aria-hidden="true">
+                {c.role === "giving" ? "↑" : "↓"}
+              </i>
             </span>
             <span className="chat-lines">
               <b>
-                {c.title}
-                <em>{c.role === "giving" ? ` · to ${c.with}` : ` · from ${c.with}`}</em>
+                {c.with}
+                <em> · {c.title}</em>
               </b>
-              <small>{c.lastBody.length > 64 ? `${c.lastBody.slice(0, 64)}…` : c.lastBody}</small>
+              <small className={c.unread > 0 ? "loud" : ""}>
+                {c.lastMine ? "You: " : ""}
+                {c.lastBody.length > 52 ? `${c.lastBody.slice(0, 52)}…` : c.lastBody}
+              </small>
             </span>
             <span className="chat-side">
-              <small>{agoLabel(Math.max(1, Math.round((Date.now() - c.lastAt) / 60000)))}</small>
-              {c.unread > 0 && <i className="chat-dot">{c.unread}</i>}
+              <small className={c.unread > 0 ? "loud" : ""}>{when(c.lastAt)}</small>
+              {c.unread > 0 ? <i className="chat-dot">{c.unread}</i> : c.done ? <i className="chat-done" aria-label="Handover complete">✓</i> : null}
             </span>
           </button>
         ))}
@@ -4474,6 +4511,12 @@ export default function Doorstep() {
                     <path d="M4 6.5h16M4 12h16M4 17.5h16" />
                   </svg>
                 </button>
+                <button aria-pressed={false} aria-label="Map view" onClick={() => setScreen("map")}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z" />
+                    <circle cx="12" cy="10" r="2.5" />
+                  </svg>
+                </button>
               </div>
 
               <button className="saved-toggle" aria-pressed={asksOnly} onClick={() => setAsksOnly((v) => !v)}>
@@ -4864,12 +4907,20 @@ export default function Doorstep() {
               </svg>
               Near you
             </button>
-            <button className="tabbar-btn" onClick={() => setScreen("map")}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z" />
-                <circle cx="12" cy="10" r="2.5" />
-              </svg>
-              Map
+            <button
+              className="tabbar-btn"
+              onClick={() => {
+                if (needsAccount("Sign in to message your neighbours")) return;
+                setScreen("chats");
+              }}
+            >
+              <span className="tabbar-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+                {chatUnread > 0 && <em>{chatUnread > 9 ? "9+" : chatUnread}</em>}
+              </span>
+              Chats
             </button>
 
             {/* the one thing the app wants you to do, sat under the thumb */}
