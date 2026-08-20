@@ -4,6 +4,15 @@
   --ink: #14261F;
   --railing: #234A3B;
   --railing-lift: #2E5F4B;
+
+  /* motion speaks one language: a spring for things that arrive, an ease
+     for things that leave, and three tempos. Every animation in this file
+     should borrow from here rather than invent its own physics. */
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --settle: cubic-bezier(0.22, 1, 0.36, 1);
+  --quick: 160ms;
+  --move: 260ms;
+  --grand: 420ms;
   --render: #E5E7DF;
   --card: #FFFFFF;
   --signal: #F5C518;
