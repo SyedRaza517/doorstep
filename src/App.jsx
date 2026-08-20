@@ -850,6 +850,21 @@ export default function Doorstep() {
     if (screen === "chat" && chatEnd.current) chatEnd.current.scrollIntoView({ block: "end" });
   }, [screen, thread]);
 
+  /* Every screen opens at its own top — the frame is one scroller shared by
+     all of them, so without this a detail page inherits however far down the
+     feed you were, and opens on the middle of the description instead of the
+     photos. The feed itself is the one exception: coming Back should land
+     you exactly where you left off, so its position is remembered. */
+  const scrollMemo = useRef(0);
+  useEffect(() => {
+    const frame = document.querySelector(".ds-frame");
+    if (!frame) return;
+    frame.scrollTop = screen === "home" ? scrollMemo.current : 0;
+    return () => {
+      if (screen === "home") scrollMemo.current = frame.scrollTop;
+    };
+  }, [screen, detailId]);
+
   /* the SSE closure outlives renders, so it reads these instead of state */
   const screenRef = useRef(screen);
   const chatIdRef = useRef(chatId);
