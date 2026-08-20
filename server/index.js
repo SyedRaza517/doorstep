@@ -17,6 +17,7 @@ import { geocodePostcode, milesBetween, formatMiles, approxCoords, FALLBACK } fr
 import { lookupPostcode, hasAddressProvider } from "./address.js";
 import { areaFor } from "./geo.js";
 import { rainOutlook, rainWarning } from "./weather.js";
+import { aiConfigured, understand } from "./ai.js";
 import { specFromPhoto, hasCredentials } from "./autospec.js";
 import { impactFor } from "./impact.js";
 
@@ -1679,6 +1680,27 @@ app.post(
     if (req.user.lat == null) return res.json({ wishers: 0 });
     const wishers = await wishersFor({ title, note, road: "", cat, lat: req.user.lat, lng: req.user.lng }, req.user.id);
     res.json({ wishers });
+  })
+);
+
+/* ---- understanding what a neighbour typed ----
+   Not a chatbot: chat-style shopping underperforms everywhere it's tried.
+   This is one structured call that turns "a desk under half a mile I can
+   carry home" into the filters the feed already speaks — magic without a
+   chat window. Without a credential it answers null and the app carries on
+   with plain search, because AI here is a quickener, never a dependency. */
+app.post(
+  "/api/understand",
+  maybeAuth,
+  wrap(async (req, res) => {
+    const text = String((req.body || {}).text || "").trim();
+    if (!text || !aiConfigured) return res.json({ filters: null });
+    try {
+      const filters = await understand(text);
+      res.json({ filters });
+    } catch {
+      res.json({ filters: null });
+    }
   })
 );
 

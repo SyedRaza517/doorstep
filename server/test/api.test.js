@@ -1545,3 +1545,13 @@ test("Spotted: a kerbside pile needs a FREE sign, counts grabs once each, thanks
   live = await call("/spots", { token: third });
   assert.ok(!live.body.spots.some((x) => x.id === posted.body.id), "two voices take it down");
 });
+
+test("understanding degrades to plain search without a key", async () => {
+  const token = await newNeighbour("Plain Searcher");
+  const res = await call("/understand", { method: "POST", token, body: { text: "a desk under half a mile I can carry home" } });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.filters, null, "no key means no magic, and no error either");
+
+  const guest = await call("/understand", { method: "POST", body: { text: "anything" } });
+  assert.equal(guest.status, 200, "guests may ask too");
+});

@@ -989,6 +989,17 @@ export default function Doorstep() {
     if (screen === "give") {
       api("/autospec/status", { token }).then((d) => setAutospec((a) => ({ ...a, configured: d.configured }))).catch(() => {});
       api("/weather?hours=4", { token }).then((d) => setSky(d.warning)).catch(() => setSky(null));
+      /* your usual category, window and mode, so listing again is two taps */
+      try {
+        const d = JSON.parse(localStorage.getItem("ds_give_defaults") || "null");
+        if (d && d.cat) {
+          setGive((g) =>
+            g.title || g.photos.length
+              ? g
+              : { ...g, cat: d.cat, type: d.type || g.type, hours: d.hours || g.hours, claimMode: d.claimMode || g.claimMode }
+          );
+        }
+      } catch {}
       /* your usual address and spot, so listing again is two taps */
       if (user && user.address) {
         setGive((g) => ({
@@ -1808,7 +1819,19 @@ export default function Doorstep() {
 
   const addWish = async () => {
     try {
-      const created = await api("/wishes", { method: "POST", token, body: newWish });
+      /* "something for my toddler to sit in at dinner" should become the
+         wish "high chair · Kids" — translated once, at the moment of adding */
+      let body = newWish;
+      if (newWish.keyword.trim().split(/[ ]+/).length >= 4) {
+        try {
+          const d = await api("/understand", { method: "POST", token, body: { text: newWish.keyword } });
+          if (d.filters && d.filters.keyword) {
+            body = { ...newWish, keyword: d.filters.keyword, cat: d.filters.cat !== "Anything" ? d.filters.cat : newWish.cat };
+            setToast(`Watching for: ${d.filters.keyword}${body.cat !== "Anything" ? ` · ${body.cat}` : ""}`);
+          }
+        } catch {}
+      }
+      const created = await api("/wishes", { method: "POST", token, body });
       setWishes((list) => [created, ...list]);
       setNewWish({ keyword: "", cat: "Anything", radius: 1 });
       if (created.alreadyOut > 0) {
@@ -1829,6 +1852,33 @@ export default function Doorstep() {
       }
     } catch (e) {
       setToast(e.message);
+    }
+  };
+
+  /* A sentence becomes filters. "a desk under half a mile I can carry home"
+     sets the search word, the category, the radius — the six controls filled
+     by the one sentence. Nothing happens when AI is off or unsure. */
+  const understandSearch = async (text) => {
+    try {
+      const d = await api("/understand", { method: "POST", token, body: { text } });
+      const f = d.filters;
+      if (!f) return false;
+      if (f.keyword) setQ(f.keyword);
+      if (f.cat && f.cat !== "Anything") setFilter(f.cat);
+      else setFilter("Going soonest");
+      if (f.type && f.type !== "all") setTypeFilter(f.type);
+      if (f.radiusMiles > 0) {
+        setRadius(Math.min(10, f.radiusMiles));
+        setCustomRadius(true);
+      }
+      setToast(
+        `Looking for ${f.keyword || (f.cat !== "Anything" ? f.cat.toLowerCase() : "everything")}${
+          f.radiusMiles > 0 ? ` within ${f.radiusMiles === 0.5 ? "half a mile" : `${f.radiusMiles} mile${f.radiusMiles === 1 ? "" : "s"}`}` : ""
+        }.`
+      );
+      return true;
+    } catch {
+      return false;
     }
   };
 
@@ -1929,6 +1979,11 @@ export default function Doorstep() {
         },
       });
       setItems((list) => [...list, created]);
+      /* the next listing starts where this one left off — repeat givers are
+         the supply side's whole economy, so their habits become defaults */
+      try {
+        localStorage.setItem("ds_give_defaults", JSON.stringify({ cat: give.cat, type: give.type, hours: give.hours, claimMode: give.claimMode }));
+      } catch {}
       setGive(EMPTY_GIVE);
       setAutospec((a) => ({ ...a, done: false }));
       setScreen("home");
@@ -4454,7 +4509,11 @@ export default function Doorstep() {
                   onBlur={() => setTimeout(() => setHintsOpen(false), 140)}
                   onKeyDown={(e) => {
                     if (e.key === "Escape") setHintsOpen(false);
-                    if (e.key === "Enter") setHintsOpen(false);
+                    if (e.key === "Enter") {
+                      setHintsOpen(false);
+                      /* a sentence is a request; a word is a search */
+                      if (q.trim().split(/[ ]+/).length >= 3) understandSearch(q.trim());
+                    }
                   }}
                   placeholder="What are you after?"
                   aria-label="Search items"
