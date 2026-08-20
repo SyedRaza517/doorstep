@@ -4,6 +4,7 @@ import { App as CapacitorApp } from "@capacitor/app";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "./styles.css";
+import { tap, success, select } from "./haptics";
 
 /* --- API client. Same-origin /api in the browser (Vite proxies it);
        native apps set VITE_API_URL to the machine running the server. --- */
@@ -256,6 +257,42 @@ const SubScreen = ({ title, time, toast, sheets, onBack, children }) => (
   </div>
 );
 
+/* The moment a claim lands. A toast alone undersells the best thing that can
+   happen in this app, so a successful claim also gets a drawn checkmark and a
+   brief fall of confetti — over the result, never instead of it: the claim
+   has already succeeded by the time this renders. Module scope for the same
+   remount reason as SubScreen; pointer-events: none so nobody's next tap is
+   ever swallowed by a party. The confetti's randomness is generated once in
+   a lazy useState initialiser so App re-renders can't reshuffle mid-fall. */
+const Celebrate = () => {
+  const [bits] = useState(() =>
+    Array.from({ length: 20 }, (_, i) => ({
+      /* where it starts across the frame, how far it drifts, how much it
+         tumbles, and how long it waits — every square its own little story */
+      left: `${4 + Math.random() * 92}%`,
+      x: `${Math.round(Math.random() * 60 - 30)}px`,
+      r: `${Math.round(180 + Math.random() * 540)}deg`,
+      delay: `${(Math.random() * 0.45).toFixed(2)}s`,
+      key: i,
+    }))
+  );
+  return (
+    <div className="celebrate" aria-hidden="true">
+      {bits.map((b) => (
+        <i key={b.key} style={{ left: b.left, "--x": b.x, "--r": b.r, "--delay": b.delay }} />
+      ))}
+      <span className="celebrate-disc">
+        {/* the classic self-drawing check: circle first, tick after — both are
+            just dashed strokes paying out their own length */}
+        <svg className="celebrate-check" viewBox="0 0 52 52" width="56" height="56">
+          <circle cx="26" cy="26" r="25" />
+          <path d="M14.1 27.2l7.1 7.2 16.7-16.8" />
+        </svg>
+      </span>
+    </div>
+  );
+};
+
 /* The handover gesture. A tap is too easy to fire by accident while someone is
    juggling a sofa cushion on a doorstep, so confirming collection asks for a
    deliberate slide — the same idea Too Good To Go uses at the counter. Pointer
@@ -291,6 +328,9 @@ const SlideToCollect = ({ onConfirm }) => {
     draggingRef.current = false;
     setDragging(false);
     setX(travel());
+    /* The slide is the app's most physical gesture, so completing it earns
+       the phone's "it worked" buzz alongside the green flash. */
+    success();
     /* The brief green "Collected ✓" state shows immediately; the handler's own
        refresh replaces this screen shortly after, so no timer is needed. */
     onConfirm();
@@ -743,6 +783,15 @@ export default function Doorstep() {
   const [aiChips, setAiChips] = useState(null);
   const chatEnd = useRef(null);
   const [reporting, setReporting] = useState(null);
+  /* true for the ~2 seconds of checkmark-and-confetti after a claim lands;
+     rendered alongside the sheets so it shows over whichever screen the
+     claim was made from */
+  const [celebrating, setCelebrating] = useState(false);
+  /* Which chat bubbles were already on screen last render, so only genuinely
+     new messages run the pop-in — reopening a thread must not replay the
+     whole history's entrance. Keyed by thread id so switching conversations
+     resets the ledger rather than treating the next thread's backlog as new. */
+  const seenMsgsRef = useRef({ threadId: null, ids: new Set() });
   const [editing, setEditing] = useState(null);
   const [shot, setShot] = useState(0);
   const [peek, setPeek] = useState(null);
@@ -916,6 +965,24 @@ export default function Doorstep() {
   useEffect(() => {
     if (screen === "chat" && chatEnd.current) chatEnd.current.scrollIntoView({ block: "end" });
   }, [screen, thread]);
+
+  /* After every commit, everything currently in the thread counts as seen.
+     This runs in an effect rather than during render so StrictMode's double
+     render can't mark a bubble seen before it has ever been painted. */
+  useEffect(() => {
+    seenMsgsRef.current = thread
+      ? { threadId: thread.id, ids: new Set(thread.messages.map((m) => m.id)) }
+      : { threadId: null, ids: new Set() };
+  }, [thread]);
+
+  /* The celebration cleans up after itself: ~1.9s covers the circle draw,
+     the tick, the bounce and the last of the confetti, then the overlay
+     unmounts so it can never sit invisibly over the app. */
+  useEffect(() => {
+    if (!celebrating) return;
+    const t = setTimeout(() => setCelebrating(false), 1900);
+    return () => clearTimeout(t);
+  }, [celebrating]);
 
   /* Every screen opens at its own top — the frame is one scroller shared by
      all of them, so without this a detail page inherits however far down the
@@ -1312,6 +1379,9 @@ export default function Doorstep() {
 
   const claim = async (item) => {
     if (needsAccount(`Sign in to claim ${item.title.toLowerCase()}`, { action: "claim", id: item.id })) return;
+    /* the press itself gets a light tick, win or lose — it acknowledges the
+       finger immediately while the network round-trip is still in flight */
+    tap();
     try {
       const updated = await api(`/items/${item.id}/claim`, { method: "POST", token });
       if (updated.fair) {
@@ -1326,6 +1396,10 @@ export default function Doorstep() {
       }
       setItems((list) => list.map((it) => (it.id === updated.id ? updated : it)));
       setToast(`Claimed. ${whereLine(updated)} Collect within 30 minutes.`);
+      /* the claim has already succeeded by this line — the confetti falls
+         over the result, never as a promise of one */
+      setCelebrating(true);
+      success();
     } catch (e) {
       setToast(e.message);
       if (e.status === 409 || e.status === 410) refresh();
@@ -1407,6 +1481,8 @@ export default function Doorstep() {
 
   const toggleSave = async (item) => {
     if (needsAccount("Sign in to save things for later")) return;
+    /* a light tick under the thumb makes the star feel like a real switch */
+    tap();
     const next = !item.saved;
     setItems((list) => list.map((i) => (i.id === item.id ? { ...i, saved: next } : i)));
     try {
@@ -2148,6 +2224,11 @@ export default function Doorstep() {
           </div>
         </div>
       )}
+      {/* The claim celebration travels with the sheets for the same reason
+          they exist: a claim can land from the feed, the detail screen or a
+          card anywhere, and the confetti should fall over whichever screen
+          the good news arrived on. */}
+      {celebrating && <Celebrate />}
     </>
   );
 
@@ -3334,6 +3415,9 @@ export default function Doorstep() {
     const sendMsg = async (text) => {
       const body = (text || draft).trim();
       if (!body || !thread) return;
+      /* the gentlest of the three haptics — sending a message is routine,
+         so it gets a selection tick rather than an impact */
+      select();
       setDraft("");
       /* optimistic: the words appear as they're said */
       setThread((t) => ({ ...t, messages: [...t.messages, { id: `tmp-${Date.now()}`, mine: true, body, createdAt: Date.now() }] }));
@@ -3351,6 +3435,14 @@ export default function Doorstep() {
     const QUICK = (aiChips && aiChips.length ? aiChips : thread && thread.role === "collecting"
       ? ["On my way now", "Running 10 minutes late — still coming", "Which house number is it?", "Got it — thank you!"]
       : ["It's outside the front door", "No rush — it'll be there", "Buzz flat when you arrive", "Glad it's going to a good home"]);
+
+    /* A bubble pops in only when it wasn't in this thread at the last commit —
+       the seen-ledger effect near the top keeps the ref current. Matching on
+       thread id stops a freshly opened conversation from animating its whole
+       backlog: a new thread's messages are new to the render, not to the
+       conversation. */
+    const seenMsgs = seenMsgsRef.current;
+    const inSameThread = thread && seenMsgs.threadId === thread.id;
 
     return (
       <SubScreen
@@ -3377,7 +3469,7 @@ export default function Doorstep() {
                 m.system ? (
                   <p key={m.id} className="msg-system">{m.body}</p>
                 ) : (
-                  <p key={m.id} className={`msg ${m.mine ? "mine" : ""}`}>{m.body}</p>
+                  <p key={m.id} className={`msg ${m.mine ? "mine" : ""}${inSameThread && !seenMsgs.ids.has(m.id) ? " landed" : ""}`}>{m.body}</p>
                 )
               )}
               <span ref={chatEnd} />

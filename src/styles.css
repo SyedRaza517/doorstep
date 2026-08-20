@@ -4296,19 +4296,23 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
   content: "";
   position: absolute;
   z-index: -1;
-  top: -30%;
-  right: -15%;
-  width: 85%;
+  /* the glow lives fully inside the hero and lets its blur do the
+     spreading: a transformed box that pokes past the edge would widen the
+     page's scrollable area, but ink overflow from a filter never does */
+  top: 6%;
+  right: 8%;
+  width: 55%;
   aspect-ratio: 1;
-  background: radial-gradient(closest-side at 45% 40%, rgba(96, 152, 126, 0.55), rgba(96, 152, 126, 0) 68%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(96, 152, 126, 0.55), rgba(96, 152, 126, 0) 70%);
+  filter: blur(28px);
   opacity: 0.5;
-  animation: hero-drift 22s linear infinite;
+  animation: hero-drift 22s ease-in-out infinite alternate;
   pointer-events: none;
 }
 @keyframes hero-drift {
-  0% { transform: translate3d(0, 0, 0) rotate(0deg); }
-  50% { transform: translate3d(-9%, 7%, 0) rotate(180deg); }
-  100% { transform: translate3d(0, 0, 0) rotate(360deg); }
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  100% { transform: translate3d(-3%, 4%, 0) scale(1.1); }
 }
 
 /* The reduced-motion safety net (WCAG 2.3.3), and it must stay the last rule
@@ -4466,6 +4470,218 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
   .hand-row:active {
     transform: none;
   }
+}
+
+
+/* ---------- motion: juice ----------
+   The tactile layer: buttons that press like keys, a star that bursts, a
+   claim that celebrates, chat that pops, docks that arrive. Everything here
+   is transform/opacity (plus the one background-size trick the save-star
+   borrows from the CSS-Tricks single-element burst), and everything is
+   switched off together under prefers-reduced-motion at the bottom. */
+
+/* -- Duolingo-school press physics --
+   The primary button gets a solid edge underneath — a darkened slice of the
+   signal yellow the brand's CTAs cast their glow in — so pressing it reads
+   as pushing a physical key 3px into the page: the button travels down and
+   the edge compresses to a sliver. 90ms is fast enough to feel mechanical
+   rather than animated. */
+.primary-btn {
+  box-shadow: 0 4px 0 #163026;
+  transition: background .15s, transform 90ms ease-out, box-shadow 90ms ease-out;
+}
+.primary-btn:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 #163026;
+}
+/* The claim CTA already casts a soft yellow glow; the hard edge joins that
+   list rather than replacing it, and both compress together on press. */
+.claim-cta {
+  box-shadow: 0 6px 16px rgba(245, 197, 24, 0.35), 0 4px 0 #163026;
+}
+.claim-cta:active:not(:disabled) {
+  box-shadow: 0 3px 10px rgba(245, 197, 24, 0.28), 0 1px 0 #163026;
+}
+/* The intro's quiet Next is a transparent outline pretending to be a primary
+   button — a solid yellow ledge under a see-through button would give the
+   trick away, so it presses flat instead. */
+.intro-next.quiet,
+.intro-next.quiet:active:not(:disabled) {
+  box-shadow: none;
+}
+.intro-next.quiet:active:not(:disabled) { transform: scale(0.98); }
+
+/* -- secondary controls squeeze rather than travel --
+   .chip and .tabbar-btn already have :active scales; the ghost button joins
+   them, and both it and the tab bar learn to ease into the squeeze instead
+   of snapping (the chip's transition already covers transform). */
+.ghost-btn { transition: border-color .15s, transform 100ms; }
+.ghost-btn:active { transform: scale(0.97); }
+.tabbar-btn { transition: color .14s, background .14s, transform 100ms; }
+
+/* -- the save-star bursts --
+   The single-element particle trick: ::before is a ring that inflates past
+   the button and fades; ::after carries six dots as radial-gradient
+   background layers that fly outward (the element scales up) while each dot
+   shrinks to nothing (background-size animates to zero). Both run once when
+   .on lands, purely from CSS, and rest at opacity 0 the rest of the time. */
+.save-star { overflow: visible; }
+.save-star::before,
+.save-star::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+}
+.save-star::before { border: 2px solid var(--signal); }
+.save-star::after {
+  background-image:
+    radial-gradient(circle, var(--signal) 45%, transparent 50%),
+    radial-gradient(circle, var(--railing) 45%, transparent 50%),
+    radial-gradient(circle, var(--signal) 45%, transparent 50%),
+    radial-gradient(circle, var(--railing) 45%, transparent 50%),
+    radial-gradient(circle, var(--signal) 45%, transparent 50%),
+    radial-gradient(circle, var(--railing) 45%, transparent 50%);
+  background-position: 50% 0%, 100% 30%, 88% 92%, 50% 100%, 0% 70%, 8% 12%;
+  background-size: 7px 7px;
+  background-repeat: no-repeat;
+}
+.save-star.on::before { animation: star-ring 700ms ease-out; }
+.save-star.on::after { animation: star-burst 700ms ease-out; }
+@keyframes star-ring {
+  0% { opacity: 1; transform: scale(0); }
+  60% { opacity: 0.6; }
+  100% { opacity: 0; transform: scale(1.4); }
+}
+@keyframes star-burst {
+  0% { opacity: 1; transform: scale(0.5); background-size: 7px 7px; }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.3); background-size: 0 0; }
+}
+
+/* -- the claim celebration --
+   A full-frame, untouchable overlay: the circle draws itself, the tick
+   follows, the disc takes a little bow, and twenty squares in the house
+   colours fall past. All of it happens after the claim has succeeded — it
+   decorates the result, it never predicts one. */
+.celebrate {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.celebrate-disc {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 36px rgba(15, 30, 24, 0.25);
+  display: grid;
+  place-items: center;
+  /* the bow comes only after the tick has finished landing */
+  animation: celebrate-bow 320ms ease-in-out 1050ms;
+}
+.celebrate-check circle {
+  fill: none;
+  stroke: var(--railing);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 166;
+  stroke-dashoffset: 166;
+  animation: celebrate-draw 600ms ease-in-out forwards;
+}
+.celebrate-check path {
+  fill: none;
+  stroke: var(--railing);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 48;
+  stroke-dashoffset: 48;
+  animation: celebrate-draw 300ms ease-in-out 700ms forwards;
+}
+@keyframes celebrate-draw { to { stroke-dashoffset: 0; } }
+@keyframes celebrate-bow {
+  0%, 100% { transform: scale(1); }
+  45% { transform: scale(1.12); }
+}
+/* each square gets its own left / --x / --r / --delay inline from React;
+   88vh guarantees the fall clears the bottom of any phone */
+.celebrate i {
+  position: absolute;
+  top: -10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 1.5px;
+  opacity: 0;
+  background: var(--signal);
+  animation: confetti-fall 1.8s ease-in var(--delay, 0s) forwards;
+}
+.celebrate i:nth-child(3n) { background: var(--railing); }
+.celebrate i:nth-child(3n + 2) { background: var(--render); }
+@keyframes confetti-fall {
+  0% { opacity: 1; transform: translate3d(0, 0, 0) rotate(0deg); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translate3d(var(--x, 0px), 88vh, 0) rotate(var(--r, 360deg)); }
+}
+
+/* -- chat bubbles pop in --
+   Only bubbles that are genuinely new (the .landed class is granted by the
+   seen-ledger in React) rise into place; history stays put. The origin sits
+   at the bubble's tail, so each one appears to grow from where it was
+   spoken. */
+.msg.landed {
+  transform-origin: bottom left;
+  animation: msg-pop 180ms var(--spring) backwards;
+}
+.msg.mine.landed { transform-origin: bottom right; }
+@keyframes msg-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+}
+
+/* -- the docks arrive from below --
+   The claim dock and the composer are the screen's verbs; sliding up on
+   mount announces "here is the thing you can do" without stealing focus. */
+.claim-dock,
+.composer {
+  animation: dock-rise 320ms var(--spring);
+}
+@keyframes dock-rise {
+  from { transform: translateY(100%); }
+}
+
+/* -- reduced motion switches the party off --
+   The global reduce rule above kills animations on elements and ::before,
+   but not ::after — the star's dots need their own line. The celebration
+   keeps its meaning without its theatre: a static drawn checkmark (the
+   dash offsets must be forced to 0, or killing the animation leaves the
+   check invisible) and no confetti. */
+@media (prefers-reduced-motion: reduce) {
+  .save-star.on::before,
+  .save-star.on::after {
+    animation: none !important;
+    opacity: 0;
+  }
+  .celebrate i { display: none; }
+  .celebrate-check circle,
+  .celebrate-check path {
+    animation: none !important;
+    stroke-dashoffset: 0;
+  }
+  .msg.landed,
+  .claim-dock,
+  .composer,
+  .celebrate-disc {
+    animation: none !important;
+  }
+  .primary-btn:active:not(:disabled) { transform: none; }
+  .ghost-btn:active { transform: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
