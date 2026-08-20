@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { flushSync } from "react-dom";
 import { App as CapacitorApp } from "@capacitor/app";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -612,6 +613,16 @@ function formatLeft(ms) {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }
 
+/* A tiny conic-gradient ring beside the countdown on the detail screen. It
+   reads the same remaining/window arithmetic as the bar below it, so the two
+   can never disagree; the colour walks from green through signal yellow to
+   brick as the window closes, which the eye reads faster than digits do. */
+const MeterRing = ({ remaining, windowMs }) => {
+  const p = Math.max(0, Math.min(100, (remaining / windowMs) * 100));
+  const c = p > 50 ? "var(--railing)" : p >= 20 ? "var(--signal)" : "var(--brick)";
+  return <span className="meter-ring" aria-hidden="true" style={{ "--p": `${p}%`, "--ring-c": c }} />;
+};
+
 function whereLine(item) {
   return item.spot === "buzz and collect"
     ? `Buzz at ${item.address} and they'll bring it down.`
@@ -627,10 +638,44 @@ export default function Doorstep() {
      The one exception is a guest we have never met at all — they get the
      three-slide pitch once, because the feed only sells itself to someone
      who already knows the things on it are free and around the corner. */
-  const [screen, setScreen] = useState(() => {
+  const [screen, rawSetScreen] = useState(() => {
     if (token) return "loading";
     return localStorage.getItem("ds_seen_intro") ? "home" : "intro";
   });
+  /* Every screen change in the app funnels through this one wrapper so the
+     whole page can cross-fade via the View Transition API instead of cutting.
+     flushSync is required because the browser snapshots the old frame and
+     waits for the callback to finish painting the new one — a batched update
+     would leave the snapshot staring at an unchanged page. That is safe here
+     because setScreen is only ever called from event handlers and async
+     callbacks, never during render or inside an effect. Browsers without the
+     API, and people who asked their OS for reduced motion, get the original
+     instant cut — which is the correct fallback, not a degraded one. */
+  const setScreen = useCallback((next) => {
+    const apply = () => flushSync(() => rawSetScreen(next));
+    if (document.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+      document.startViewTransition(apply);
+    else rawSetScreen(next);
+  }, []);
+  /* The 1px sentinel at the very top of the home scroll: the moment it leaves
+     view we know the user has scrolled, and the topbar earns its shadow. An
+     observer is cheaper and steadier than a scroll listener, and toggling a
+     class on the phone frame lets CSS own the actual animation. */
+  const homeSentinel = useRef(null);
+  useEffect(() => {
+    if (screen !== "home") return;
+    const el = homeSentinel.current;
+    const phone = el && el.closest(".ds-phone");
+    if (!el || !phone || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([entry]) => {
+      phone.classList.toggle("condensed", !entry.isIntersecting);
+    });
+    io.observe(el);
+    return () => {
+      phone.classList.remove("condensed");
+      io.disconnect();
+    };
+  }, [screen]);
   /* which pitch slide is in view, and the rail itself so the Next button
      and the dots can drive the scroll rather than duplicate it */
   const [introSlide, setIntroSlide] = useState(0);
@@ -2471,6 +2516,7 @@ export default function Doorstep() {
                   <span className="detail-spot">Waiting spot: {item.spot}</span>
                 </div>
                 <div className="meter-row detail-meter">
+                  <MeterRing remaining={item.expiresAt - now} windowMs={item.windowMs} />
                   <span className="meter-time">{formatLeft(item.expiresAt - now)}</span>
                   <div className="meter-track">
                     <div className="meter-fill" style={{ width: `${Math.max(0, Math.min(100, ((item.expiresAt - now) / item.windowMs) * 100))}%` }} />
@@ -2689,6 +2735,7 @@ export default function Doorstep() {
                 )}
 
                 <div className="meter-row detail-meter">
+                  <MeterRing remaining={item.expiresAt - now} windowMs={item.windowMs} />
                   <span className="meter-time">{formatLeft(item.expiresAt - now)}</span>
                   <div className="meter-track">
                     <div className="meter-fill" style={{ width: `${Math.max(0, Math.min(100, ((item.expiresAt - now) / item.windowMs) * 100))}%` }} />
@@ -4483,6 +4530,9 @@ export default function Doorstep() {
       <div className="ds-phone on-home">
         <StatusBar time={timeNow} />
         <div className="ds-frame">
+          {/* the scroll sentinel: one invisible pixel whose only job is to
+              tell the observer above whether the feed has been scrolled */}
+          <div className="scroll-sentinel" ref={homeSentinel} aria-hidden="true" />
           <header className="topbar">
             <div className="wordmark">
               Doorstep <span className="wordmark-dot" />

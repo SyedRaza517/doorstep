@@ -4201,3 +4201,140 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
 .quick-row.live .quick-chip {
   border-left: 2px solid var(--signal);
 }
+
+/* ---------- motion: stage ---------- */
+
+/* Screen changes cross-fade through the View Transition API: the old screen
+   fades away while the new one settles in from a shallow rise. The rise uses
+   a decelerate-only curve rather than the bouncy --spring because a whole
+   page arriving should feel like it lands, not like it boings. Browsers
+   without the API never reach these rules — App.jsx guards the call. */
+@keyframes vt-fade-out {
+  to { opacity: 0; }
+}
+@keyframes vt-slide-in {
+  from { opacity: 0; transform: translateY(10px); }
+}
+::view-transition-old(root) {
+  animation: 200ms var(--settle) both vt-fade-out;
+}
+::view-transition-new(root) {
+  animation: 260ms cubic-bezier(0.05, 0.7, 0.1, 1) both vt-slide-in;
+}
+
+/* The home topbar earns a shadow only once the feed has actually been
+   scrolled — a resting page should look flat. The shadow lives on a
+   pseudo-element and only its OPACITY transitions, because animating
+   box-shadow itself repaints on every frame while opacity composites.
+   The sentinel div is invisible scaffolding and must cost no layout. */
+.scroll-sentinel {
+  height: 1px;
+  margin-bottom: -1px;
+  flex: none;
+  pointer-events: none;
+}
+.on-home .topbar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  box-shadow: 0 8px 20px rgba(15, 30, 24, 0.28);
+  opacity: 0;
+  transition: opacity var(--move) var(--settle);
+  pointer-events: none;
+}
+.condensed .topbar::after {
+  opacity: 1;
+}
+
+/* The greeting and the count rise into place when home mounts — a small
+   staggered welcome, run once, so returning to the feed feels like arriving
+   somewhere rather than the DOM simply existing. The delays are short enough
+   that nobody waits on them; "both" holds the hidden state through the delay
+   so nothing flashes before its turn. */
+@keyframes stage-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.hero-hi {
+  animation: stage-rise 300ms cubic-bezier(0.05, 0.7, 0.1, 1) 80ms both;
+}
+.hero .feed-head {
+  animation: stage-rise 300ms cubic-bezier(0.05, 0.7, 0.1, 1) 160ms both;
+}
+
+/* The countdown ring beside the detail timer. Registering --p as a real
+   <percentage> lets supporting browsers transition the custom property, so
+   the ring sweeps smoothly between the once-a-second ticks instead of
+   stepping; where @property is unsupported it simply steps, which is the
+   same behaviour the digits already have. The radial-gradient mask punches
+   the hole — no extra element, and the conic fill stays a single paint. */
+@property --p {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+.meter-ring {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: conic-gradient(var(--ring-c, var(--railing)) var(--p, 0%), rgba(35, 74, 59, 0.12) 0);
+  -webkit-mask: radial-gradient(closest-side, transparent 60%, #000 61%);
+  mask: radial-gradient(closest-side, transparent 60%, #000 61%);
+  transition: --p 1s linear;
+}
+
+/* Empty states breathe instead of sitting dead: a slow transform-only float
+   on the illustration, alternating so it drifts rather than loops. Gentle on
+   purpose — an empty page should feel calm, not busy. */
+@keyframes stage-float {
+  to { transform: translateY(-5px); }
+}
+.empty-state svg,
+.wish-empty img {
+  animation: stage-float 3s ease-in-out infinite alternate;
+}
+
+/* A faint pool of lighter green drifts across the hero on a slow loop. It
+   paints on a negative-z pseudo, which in the hero's own stacking context
+   sits above the hero's background but beneath every child — so the greeting,
+   the count and the floating search pill all stay on top of it. Only
+   transform animates, so the drift lives entirely on the compositor. The
+   gradient's edge is fully transparent well inside the box, which keeps the
+   glow from spilling visibly past the hero even though the box overshoots. */
+.hero::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: -30%;
+  right: -15%;
+  width: 85%;
+  aspect-ratio: 1;
+  background: radial-gradient(closest-side at 45% 40%, rgba(96, 152, 126, 0.55), rgba(96, 152, 126, 0) 68%);
+  opacity: 0.5;
+  animation: hero-drift 22s linear infinite;
+  pointer-events: none;
+}
+@keyframes hero-drift {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50% { transform: translate3d(-9%, 7%, 0) rotate(180deg); }
+  100% { transform: translate3d(0, 0, 0) rotate(360deg); }
+}
+
+/* The reduced-motion safety net (WCAG 2.3.3), and it must stay the last rule
+   in this file so nothing can out-specify it by source order. The blocks
+   above provide the deliberate replacements — instant screen cuts, a shadow
+   that still appears, a ring that still shows the right fraction — so
+   flattening every animation and transition to a hair above zero removes the
+   motion without removing the meaning. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
