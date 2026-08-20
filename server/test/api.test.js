@@ -1555,3 +1555,34 @@ test("understanding degrades to plain search without a key", async () => {
   const guest = await call("/understand", { method: "POST", body: { text: "anything" } });
   assert.equal(guest.status, 200, "guests may ask too");
 });
+
+/* ---- AI listing moderation ---- */
+
+test("without an AI credential a normal listing goes straight up, and no review flag leaks out", async () => {
+  const token = await signIn("demo@doorstep.uk", "doorstep123");
+  const created = await call("/items", {
+    method: "POST",
+    token,
+    body: { title: "Scuffed two-seater sofa", note: "A bit worn but comfy", cat: "Furniture", road: "Test Road, E8", address: "1 Test Road, London E8 3EP" },
+  });
+  assert.equal(created.status, 201, "with no credential configured the AI check must never get in the way");
+  /* review_flag is an internal audit column: whatever the moderation
+     verdict, the API response must never carry it */
+  assert.equal(created.body.reviewFlag, undefined, "the review flag must not be exposed");
+  assert.equal(created.body.review_flag, undefined, "the review flag must not be exposed");
+});
+
+test("the regex bans fire before the AI layer, so a car seat is refused even with no key", async () => {
+  const token = await signIn("demo@doorstep.uk", "doorstep123");
+  const banned = await call("/items", {
+    method: "POST",
+    token,
+    body: { title: "Britax car seat, barely used", cat: "Kids", road: "Test Road, E8", address: "1 Test Road, London E8 3EP" },
+  });
+  assert.equal(banned.status, 400);
+  /* the exact wording proves which layer answered: this sentence belongs to
+     the BANNED_RE check, which runs before checkListing is ever consulted —
+     the hard bans must never depend on a credential being configured */
+  assert.match(banned.body.error, /car seats, cot mattresses/, "the refusal must come from the regex layer, not the AI");
+  assert.equal(banned.body.field, "title");
+});

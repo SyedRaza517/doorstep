@@ -19,6 +19,7 @@ import { areaFor } from "./geo.js";
 import { rainOutlook, rainWarning } from "./weather.js";
 import { aiConfigured, understand } from "./ai.js";
 import { specFromPhoto, hasCredentials } from "./autospec.js";
+import { checkListing, hasCredentials as hasModerationCredentials } from "./moderate.js";
 import { impactFor } from "./impact.js";
 
 const PORT = process.env.PORT || 4000;
@@ -1204,6 +1205,24 @@ app.post(
         "title"
       );
 
+    /* AI safety check, deliberately AFTER the regexes: the hard bans above
+       never depend on a credential being configured, and the model only has
+       to catch what a word list can't — "Britax for the little one" is a car
+       seat whether or not it says so. Asks are skipped because nothing
+       changes hands until a giver answers with their own listing, which gets
+       checked in its own right. On any API failure checkListing answers
+       "fine", so moderation can never stop a neighbourhood from sharing. */
+    let reviewFlag = null;
+    if (hasModerationCredentials && !isAsk) {
+      const check = await checkListing({ title, note, type, photo: shots.list[0] || null });
+      if (check.verdict === "block")
+        return fail(res, 400, check.reason || "That can't be passed on second-hand", "title");
+      /* "review" goes live regardless — launch friction stays near zero —
+         but the verdict is kept on the row as an audit trail for later */
+      if (check.verdict === "review")
+        reviewFlag = JSON.stringify({ category: check.category || "other", reason: check.reason || "" });
+    }
+
     const now = Date.now();
     /* an ask can wait longer than a melting doorstep listing: up to three days */
     const capMin = isAsk ? 3 * 24 * 60 : type === "food" ? FOOD_MAX_WINDOW_MIN : 24 * 60;
@@ -1233,8 +1252,8 @@ app.post(
 
     /* the item sits on the giver's own property, so it inherits their coordinates */
     const row = await one(
-      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, photo, photos, spot, postcode, lat, lng, type, use_by, portions, details, wanted, claim_mode, under_cover, dibs, lineage_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) RETURNING *`,
+      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, photo, photos, spot, postcode, lat, lng, type, use_by, portions, details, wanted, claim_mode, under_cover, dibs, lineage_id, review_flag)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) RETURNING *`,
       [
         req.user.id,
         title.trim(),
@@ -1261,6 +1280,7 @@ app.post(
         underCover === true,
         dibs === true && !isAsk,
         lineageId,
+        reviewFlag,
       ]
     );
 

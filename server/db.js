@@ -424,6 +424,7 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS country TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_accepted_at BIGINT;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS lineage_id TEXT;
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS review_flag TEXT;
   `);
 }
 
