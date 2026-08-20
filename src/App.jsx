@@ -711,7 +711,7 @@ export default function Doorstep() {
   const [demand, setDemand] = useState(0);
   const [stuff, setStuff] = useState(null);
   const [tab, setTab] = useState("toCollect");
-  const [autospec, setAutospec] = useState({ configured: false, busy: false, done: false });
+  const [autospec, setAutospec] = useState({ configured: false, busy: false, done: false, candidates: [] });
   const fileRef = useRef(null);
   const mapRef = useRef(null);
   const mapObj = useRef(null);
@@ -1562,26 +1562,56 @@ export default function Doorstep() {
 
   /* photo → draft listing. The giver confirms rather than types, and the
      estimated size picks the window (2h carry, 3h two-person, 4h van). */
+  /* One product guess becomes the whole form: name, maker, sizes, the lot.
+     The keys the AI speaks map onto the detail fields the form asks for. */
+  const applyCandidate = (c) => {
+    const d = c.details || {};
+    const filled = {};
+    if (d.condition) filled.condition = d.condition;
+    if (d.carry) filled.carry = d.carry;
+    if (d.widthCm) filled.width = String(Math.round(d.widthCm));
+    if (d.depthCm) filled.depth = String(Math.round(d.depthCm));
+    if (d.heightCm) filled.height = String(Math.round(d.heightCm));
+    if (d.material) filled.material = d.material;
+    if (d.colour) filled.colour = d.colour;
+    if (d.flatpack) filled.flatpack = d.flatpack;
+    if (d.ages) filled.ages = d.ages;
+    if (d.pieces) filled.pieces = d.pieces;
+    if (d.washed) filled.washed = d.washed;
+    if (d.works) filled.works = d.works;
+    if (d.cable) filled.cable = d.cable;
+    if (d.age) filled.age = d.age;
+    if (d.quantity) filled.quantity = d.quantity;
+    if (c.brand) filled.brand = c.brand;
+
+    setGive((g) => ({
+      ...g,
+      title: c.title,
+      note: c.note,
+      cat: c.cat,
+      hours: Math.round((c.windowMinutes || 120) / 60),
+      hazards: c.hazards || [],
+      details: { ...g.details, ...filled },
+    }));
+  };
+
   const runAutospec = async (photo) => {
-    setAutospec((a) => ({ ...a, busy: true }));
+    setAutospec((a) => ({ ...a, busy: true, candidates: [] }));
     try {
       const spec = await api("/autospec", { method: "POST", token, body: { photo } });
-      setGive((g) => ({
-        ...g,
-        title: spec.title,
-        note: spec.note,
-        cat: spec.cat,
-        hours: Math.round((spec.windowMinutes || 120) / 60),
-        hazards: spec.hazards || [],
-      }));
-      setAutospec((a) => ({ ...a, busy: false, done: true }));
+      const candidates = spec.candidates && spec.candidates.length ? spec.candidates : [spec];
+      /* the best guess fills the form at once — auto first, choice after */
+      applyCandidate(candidates[0]);
+      setAutospec((a) => ({ ...a, busy: false, done: true, candidates: candidates.length > 1 ? candidates : [] }));
       setToast(
-        spec.confidence === "low"
-          ? "Had a guess from the photo — check the details before listing."
-          : "Filled in from your photo — change anything that's off."
+        candidates[0].brand
+          ? `Looks like a ${candidates[0].brand} ${candidates[0].title.toLowerCase()} — details filled in. Not it? Pick another below.`
+          : candidates[0].confidence === "low"
+            ? "Had a guess from the photo — check the details before listing."
+            : "Filled in from your photo — change anything that's off."
       );
     } catch (e) {
-      setAutospec((a) => ({ ...a, busy: false }));
+      setAutospec((a) => ({ ...a, busy: false, candidates: [] }));
       setToast(e.message);
     }
   };
@@ -4013,6 +4043,33 @@ export default function Doorstep() {
                 <div className="photo-actions">
                   <button className="retake" onClick={() => runAutospec(give.photos[0])}>
                     Read the photo again
+                  </button>
+                </div>
+              )}
+
+              {autospec.candidates && autospec.candidates.length > 1 && (
+                <div className="spec-choices">
+                  <p className="sub-head">Which one is it?</p>
+                  {autospec.candidates.map((c, i) => (
+                    <button
+                      key={i}
+                      className="spec-choice"
+                      onClick={() => {
+                        applyCandidate(c);
+                        setAutospec((a) => ({ ...a, candidates: [] }));
+                        setToast("Swapped — details filled in for that one.");
+                      }}
+                    >
+                      <b>
+                        {c.title}
+                        {c.brand ? <em> · {c.brand}</em> : null}
+                      </b>
+                      <small>{c.note}</small>
+                    </button>
+                  ))}
+                  <button className="spec-choice none" onClick={() => setAutospec((a) => ({ ...a, candidates: [] }))}>
+                    <b>None of these</b>
+                    <small>Keep what's filled in and change it yourself</small>
                   </button>
                 </div>
               )}
