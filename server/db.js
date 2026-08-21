@@ -456,6 +456,10 @@ export async function initDb() {
     ALTER TABLE items ADD COLUMN IF NOT EXISTS last_orders_told BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS under_cover BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS dibs BOOLEAN NOT NULL DEFAULT FALSE;
+    /* a listing that came from the demo neighbourhood says so, for as long
+       as it exists: an address nobody should walk to must never look like
+       an address someone should */
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS demo BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE postcode_cache ADD COLUMN IF NOT EXISTS city TEXT;
     ALTER TABLE postcode_cache ADD COLUMN IF NOT EXISTS county TEXT;
     ALTER TABLE postcode_cache ADD COLUMN IF NOT EXISTS country TEXT;
@@ -844,6 +848,10 @@ export async function refreshSeed() {
       ]
     );
   }
+
+  /* one sweep at the end, so no insert site can forget: everything the demo
+     neighbourhood owns is stamped as demo, whatever route created it */
+  await query("UPDATE items SET demo = TRUE WHERE owner_id = ANY($1::bigint[])", [[...giverIds, demoId]]);
 
   await seedActivity({ now, demoId, giverIds, listed, history });
 }

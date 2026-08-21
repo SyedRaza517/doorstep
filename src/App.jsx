@@ -2998,6 +2998,17 @@ export default function Doorstep() {
                   </div>
                 )}
 
+                {item.demo && (
+                  <div className="demo-note">
+                    <b>This one is part of the demo neighbourhood.</b>
+                    <span>
+                      Nobody lives behind it — the address is a real Hackney street with an
+                      invented house number, so please don't go and knock. It is here so the
+                      app has something to show while the first real neighbours arrive.
+                    </span>
+                  </div>
+                )}
+
                 {(mine || item.owner) && (
                   <div className="rule-card address-card">
                     <p className="rule-title">{mine ? "Your collection address" : "Your listing"}</p>
@@ -5728,6 +5739,7 @@ export default function Doorstep() {
                           {item.lastOrders ? `Last orders · ${formatLeft(remaining)}` : formatLeft(remaining)}
                         </span>
                         {item.dist && <span className="gcard-dist">{item.dist}</span>}
+                        {item.demo && <span className="gcard-demo">Demo</span>}
                         {item.wanted && <span className="gcard-want">Wanted</span>}
                         {item.type === "food" && !item.wanted && !gone && !mine && !item.owner && (
                           <span className="gcard-food">Food</span>

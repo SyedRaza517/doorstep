@@ -1892,3 +1892,23 @@ test("an open doorstep gathers its listings, keeps the door private until it ope
   assert.equal(still.eventId, null, "it simply stops pointing at an event");
   assert.ok(still.expiresAt > Date.now(), "and keeps the window it was given");
 });
+
+test("the demo neighbourhood owns up to being a demo", async () => {
+  const token = await signIn("demo@doorstep.uk", "doorstep123");
+  const feed = await call("/items?limit=6", { token });
+  assert.ok(feed.body.items.length > 0, "the demo database has listings");
+  assert.ok(
+    feed.body.items.every((i) => i.demo === true),
+    "every seeded listing carries the flag that stops it being mistaken for a real doorstep"
+  );
+
+  /* something a real neighbour lists is not a demo */
+  const giver = await newNeighbour("Genuine Giver");
+  const real = await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Genuine kitchen stool", cat: "Furniture", road: "Test Road, E8", address: "99 Test Road, London E8 3EP" },
+  });
+  assert.equal(real.status, 201);
+  assert.equal(real.body.demo, false, "a real listing is never labelled a demo");
+});

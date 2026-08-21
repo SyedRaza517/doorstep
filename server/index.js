@@ -586,6 +586,7 @@ function publicItem(it, user, now, ctx) {
     type: it.type || "nonfood",
     wanted: it.wanted === true,
     claimMode: it.claim_mode || "instant",
+    demo: it.demo === true,
     lastOrders,
     underCover: it.under_cover === true,
     dibs: it.dibs === true,
@@ -3334,9 +3335,19 @@ app.use((err, req, res, next) => {
   fail(res, 500, "Something went wrong at our end. Try again in a moment.");
 });
 
+/* The demo neighbourhood is furniture for an empty room, and it must never
+   be mistaken for the real thing. Its two hundred listings carry real
+   Hackney house numbers, so a neighbour who trusted them could walk to a
+   stranger's actual front door expecting a chair. It therefore seeds only
+   where it is obviously a demo — a local PGlite database — and refuses to
+   touch a real Postgres unless someone deliberately asks for it in writing
+   with SEED_DEMO=1. */
+const seedingWanted = process.env.SEED_DEMO === "1" || !process.env.DATABASE_URL;
+
 const start = async () => {
   await initDb();
-  await refreshSeed();
+  if (seedingWanted) await refreshSeed();
+  else console.log("Live database: the demo neighbourhood was not seeded (set SEED_DEMO=1 to override).");
   app.listen(PORT, "0.0.0.0", () => {
     console.log(
       `Doorstep API listening on http://localhost:${PORT} (${process.env.DATABASE_URL ? "Postgres" : "PGlite"})`

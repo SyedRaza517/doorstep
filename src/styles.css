@@ -5218,3 +5218,35 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
     transform: none;
   }
 }
+
+/* ---------- the demo neighbourhood owns up ----------
+   Furniture for an empty room must never be mistaken for a real doorstep,
+   so a seeded listing says so on its card and explains itself in full on
+   the screen where someone would otherwise set off walking. */
+.gcard-demo {
+  position: absolute;
+  left: 7px;
+  top: 7px;
+  font-family: var(--body);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+  background: rgba(20, 38, 31, 0.78);
+  border-radius: 20px;
+  padding: 3px 8px;
+}
+
+.demo-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 14px 0;
+  padding: 13px 15px;
+  border: 1px dashed rgba(35, 74, 59, 0.4);
+  border-radius: 14px;
+  background: rgba(35, 74, 59, 0.05);
+}
+.demo-note b { font-size: 13.5px; color: var(--railing); }
+.demo-note span { font-size: 12.5px; line-height: 1.5; color: var(--hush); }
