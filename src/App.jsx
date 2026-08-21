@@ -812,6 +812,7 @@ export default function Doorstep() {
   const [autospec, setAutospec] = useState({ configured: false, busy: false, done: false, candidates: [] });
   const fileRef = useRef(null);
   const mapRef = useRef(null);
+  const miniMapRef = useRef(null);
   const mapObj = useRef(null);
 
   useClock();
@@ -1176,6 +1177,41 @@ export default function Doorstep() {
     const t = setTimeout(() => setToast(null), 4200);
     return () => clearTimeout(t);
   }, [toast]);
+
+  /* A postcard of the neighbourhood on the front page: the real map, pins
+     and all, with its hands tied — no panning, no zooming, no pointer at
+     all — so it scrolls like a picture and opens like a door. */
+  useEffect(() => {
+    if (screen !== "home" || !miniMapRef.current) return;
+    const centre = user && user.lat != null ? [user.lat, user.lng] : [51.5416, -0.0575];
+    const m = L.map(miniMapRef.current, {
+      zoomControl: false,
+      attributionControl: false,
+      dragging: false,
+      touchZoom: false,
+      scrollWheelZoom: false,
+      doubleClickZoom: false,
+      boxZoom: false,
+      keyboard: false,
+      tapHold: false,
+    });
+    m.setView(centre, 14);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(m);
+    for (const it of items.slice(0, 40)) {
+      if (it.lat == null) continue;
+      L.circleMarker([it.lat, it.lng], {
+        radius: 5,
+        color: "#FFFFFF",
+        weight: 1.5,
+        fillColor: it.wanted ? "#A64B2A" : "#234A3B",
+        fillOpacity: 0.95,
+      }).addTo(m);
+    }
+    if (user && user.lat != null) {
+      L.circleMarker(centre, { radius: 6, color: "#FFFFFF", weight: 2, fillColor: "#2B6CB0", fillOpacity: 1 }).addTo(m);
+    }
+    return () => m.remove();
+  }, [screen, items.length, user]);
 
   /* ---- map lifecycle ---- */
 
@@ -3891,18 +3927,8 @@ export default function Doorstep() {
               </div>
 
               <div className="profile-links">
-                <button onClick={() => setScreen("chats")}>
-                  <span className="link-ic" aria-hidden="true">
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-                  </span>
-                  <span className="link-copy">
-                    Messages
-                    <span>Arrange handovers with your neighbours</span>
-                  </span>
-                  {chatUnread > 0 ? <span className="link-badge">{chatUnread > 9 ? "9+" : chatUnread}</span> : <span className="link-go" aria-hidden="true">›</span>}
-                </button>
                 <button onClick={() => { setTab("toCollect"); setScreen("mine"); }}>
-                  <span className="link-ic" aria-hidden="true">
+                  <span className="link-ic green" aria-hidden="true">
                     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 8h14l-1.2 11.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z" /><path d="M9 8V6a3 3 0 0 1 6 0v2" /></svg>
                   </span>
                   <span className="link-copy">
@@ -3912,7 +3938,7 @@ export default function Doorstep() {
                   <span className="link-go" aria-hidden="true">›</span>
                 </button>
                 <button onClick={() => setScreen("wishes")}>
-                  <span className="link-ic" aria-hidden="true">
+                  <span className="link-ic rose" aria-hidden="true">
                     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20.5S3.5 15 3.5 9.2A4.2 4.2 0 0 1 12 7a4.2 4.2 0 0 1 8.5 2.2c0 5.8-8.5 11.3-8.5 11.3Z" /></svg>
                   </span>
                   <span className="link-copy">
@@ -3922,7 +3948,7 @@ export default function Doorstep() {
                   <span className="link-go" aria-hidden="true">›</span>
                 </button>
                 <button onClick={() => setScreen("radar")}>
-                  <span className="link-ic" aria-hidden="true">
+                  <span className="link-ic gold" aria-hidden="true">
                     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="2" /><path d="M16.2 7.8a6 6 0 0 1 0 8.4M7.8 16.2a6 6 0 0 1 0-8.4M19 5a10 10 0 0 1 0 14M5 19A10 10 0 0 1 5 5" /></svg>
                   </span>
                   <span className="link-copy">
@@ -3932,7 +3958,7 @@ export default function Doorstep() {
                   <span className="link-go" aria-hidden="true">›</span>
                 </button>
                 <button onClick={() => setScreen("impact")}>
-                  <span className="link-ic" aria-hidden="true">
+                  <span className="link-ic blue" aria-hidden="true">
                     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18M5.5 12.5L12 19l6.5-6.5" /></svg>
                   </span>
                   <span className="link-copy">
@@ -4958,6 +4984,17 @@ export default function Doorstep() {
                   </button>
                 )}
               </div>
+            )}
+
+            {!q.trim() && (
+              <button className="map-peek" onClick={() => setScreen("map")} aria-label="Open the map">
+                <div className="map-peek-canvas" ref={miniMapRef} aria-hidden="true" />
+                <span className="map-peek-chip">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0z" /><circle cx="12" cy="10" r="3" /></svg>
+                  {items.filter((i) => i.lat != null).length} pinned around you
+                </span>
+                <span className="map-peek-open">Open the map ›</span>
+              </button>
             )}
 
             {recent.length > 0 && !q.trim() && (

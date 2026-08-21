@@ -4694,3 +4694,74 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------- coloured profile rows, and the map postcard ---------- */
+
+/* each row wears its own colour, so the eye can find a destination before
+   the words are read: green for your things, rose for wishing, gold for
+   the radar, blue for the reckoning */
+.link-ic.green { background: rgba(35, 74, 59, 0.12); color: var(--railing); }
+.link-ic.rose { background: rgba(166, 75, 42, 0.14); color: var(--brick); }
+.link-ic.gold { background: rgba(245, 197, 24, 0.24); color: #8a6d00; }
+.link-ic.blue { background: rgba(43, 108, 176, 0.14); color: #2B6CB0; }
+
+/* the neighbourhood as a postcard: real tiles, real pins, hands tied */
+.map-peek {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 150px;
+  border: 1px solid rgba(35, 74, 59, 0.16);
+  border-radius: 18px;
+  overflow: hidden;
+  padding: 0;
+  margin: 0 0 16px;
+  cursor: pointer;
+  background: var(--render);
+  box-shadow: 0 3px 12px rgba(20, 38, 31, 0.08);
+  transition: transform var(--quick) var(--settle), box-shadow var(--quick) var(--settle);
+}
+.map-peek:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(20, 38, 31, 0.14); }
+.map-peek:active { transform: scale(0.99); }
+
+.map-peek-canvas {
+  position: absolute;
+  inset: 0;
+  /* the picture never argues with a finger — the card takes the tap */
+  pointer-events: none;
+}
+
+.map-peek-chip {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 800; /* above every Leaflet pane */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--body);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--railing);
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  padding: 6px 11px;
+  box-shadow: 0 2px 8px rgba(20, 38, 31, 0.18);
+  pointer-events: none;
+}
+
+.map-peek-open {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  z-index: 800;
+  font-family: var(--body);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--signal);
+  border-radius: 999px;
+  padding: 7px 13px;
+  box-shadow: 0 3px 10px rgba(20, 38, 31, 0.22);
+  pointer-events: none;
+}
