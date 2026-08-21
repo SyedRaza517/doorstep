@@ -536,7 +536,48 @@ const EMPTY_GIVE = {
   /* set when relisting something collected through the app — links the two
      listings into one lineage, so the item's passport travels with it */
   passFrom: null,
+  /* set when the thing is going out as part of one of your own open
+     doorsteps, which also decides when the listing lapses */
+  eventId: null,
 };
+
+/* An open doorstep before it exists. The day and the two times are held as
+   the strings the native pickers speak, and only become epoch milliseconds
+   at the moment of sending — it is the phone's own clock that decides what
+   "2pm on Saturday" means. */
+const EMPTY_EVENT = { title: "", note: "", road: "", address: "", date: "", start: "14:00", end: "16:00" };
+
+/* "2.30" or "3", plus which half of the day it sits in, so the caller can
+   drop a repeated am or pm */
+const clockTime = (ms) => {
+  const d = new Date(ms);
+  const mins = d.getMinutes();
+  return {
+    text: `${((d.getHours() + 11) % 12) + 1}${mins ? `.${String(mins).padStart(2, "0")}` : ""}`,
+    half: d.getHours() < 12 ? "am" : "pm",
+  };
+};
+
+/* "Saturday 2–4pm", "Today 10.30–11am". Nobody says "14:00–16:00" about a
+   yard sale, and a bare weekday stops meaning anything much past a week — so
+   beyond that it earns a date as well. */
+function eventWhen(startsAt, endsAt) {
+  const s = new Date(startsAt);
+  const today = new Date();
+  const sameDay = (a, b) => a.toDateString() === b.toDateString();
+  const day = sameDay(s, today)
+    ? "Today"
+    : sameDay(s, new Date(today.getTime() + 86400000))
+      ? "Tomorrow"
+      : startsAt - today.getTime() < 6 * 86400000
+        ? s.toLocaleDateString("en-GB", { weekday: "long" })
+        : s.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" });
+  const from = clockTime(startsAt);
+  const until = clockTime(endsAt);
+  /* "2–4pm" reads better than "2pm–4pm": the first time only keeps its am or
+     pm when the window crosses midday */
+  return `${day} ${from.text}${from.half === until.half ? "" : from.half}–${until.text}${until.half}`;
+}
 
 /* 1 → "1st", 2 → "2nd", 23 → "23rd" — for "2nd home" on a passport */
 function ordinal(n) {
@@ -767,6 +808,13 @@ export default function Doorstep() {
   const [spotForm, setSpotForm] = useState({ note: "", road: "", photo: null, freeSign: false });
   const [spotErrors, setSpotErrors] = useState({});
   const spotFileRef = useRef(null);
+  /* open doorsteps: the list, whichever one is open, what that one holds,
+     and the little form for starting one */
+  const [events, setEvents] = useState([]);
+  const [eventId, setEventId] = useState(null);
+  const [eventView, setEventView] = useState(null);
+  const [eventForm, setEventForm] = useState(EMPTY_EVENT);
+  const [eventErrors, setEventErrors] = useState({});
   /* the arrangement threads: the list, the open one, and what's unread */
   const [chats, setChats] = useState([]);
   const [chatUnread, setChatUnread] = useState(0);
@@ -1128,6 +1176,10 @@ export default function Doorstep() {
       api(`/chats/${chatId}/suggest`, { token }).then((d) => setAiChips(d.replies)).catch(() => setAiChips(null));
     }
     if (screen === "profile") api("/blocks", { token }).then((d) => setBlocked(d.blocked)).catch(() => {});
+    /* the give form wants them too, for the chip that hangs a new listing off
+       a sale the person already has running */
+    if (screen === "events" || screen === "give") api("/events", { token }).then((d) => setEvents(d.events)).catch(() => {});
+    if (screen === "event" && eventId) api(`/events/${eventId}`, { token }).then(setEventView).catch(() => setEventView(null));
     if (screen === "give") {
       api("/autospec/status", { token }).then((d) => setAutospec((a) => ({ ...a, configured: d.configured }))).catch(() => {});
       api("/weather?hours=4", { token }).then((d) => setSky(d.warning)).catch(() => setSky(null));
@@ -1158,7 +1210,7 @@ export default function Doorstep() {
       setNotes((list) => list.map((n) => ({ ...n, read: true })));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen, token, tab, chatId]);
+  }, [screen, token, tab, chatId, eventId]);
 
   /* the feed refreshes for guests too */
   const browsing = ["home", "map", "detail", "give", "profile", "notifications", "wishes", "impact", "fallback", "mine", "chats", "chat", "radar", "street"].includes(screen);
@@ -2127,6 +2179,7 @@ export default function Doorstep() {
           underCover: give.underCover,
           dibs: give.dibs,
           passFrom: give.passFrom,
+          eventId: give.eventId,
         },
       });
       setItems((list) => [...list, created]);
@@ -2151,6 +2204,74 @@ export default function Doorstep() {
       setGiveErrors(e.field ? { [e.field]: e.message } : { _form: e.message });
     } finally {
       setBusy(false);
+    }
+  };
+
+  const setE = (key) => (e) => {
+    setEventForm((f) => ({ ...f, [key]: e.target.value }));
+    setEventErrors((p) => (p[key] || p._form ? { ...p, [key]: null, _form: null } : p));
+  };
+
+  /* Anyone clearing a loft is clearing it at home, so the sale starts from
+     the same address the give form already remembers, on today's date. */
+  const startEvent = () => {
+    const d = new Date();
+    setEventForm((f) => ({
+      ...f,
+      road: f.road || (user && user.road) || "",
+      address: f.address || (user && user.address) || "",
+      date: f.date || `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`,
+    }));
+    setEventErrors({});
+    setScreen("event-new");
+  };
+
+  const submitEvent = async () => {
+    const next = {};
+    if (!eventForm.title.trim()) next.title = "Give it a name — 'Saturday clear-out' beats 'sale'";
+    if (!eventForm.address.trim()) next.address = "Neighbours need somewhere to come to";
+    if (!eventForm.date) next.date = "Which day is it?";
+    if (!eventForm.start || !eventForm.end) next.time = "What time does it run?";
+    /* the pickers speak local time, and so does the neighbourhood */
+    const startsAt = eventForm.date && eventForm.start ? new Date(`${eventForm.date}T${eventForm.start}`).getTime() : 0;
+    const endsAt = eventForm.date && eventForm.end ? new Date(`${eventForm.date}T${eventForm.end}`).getTime() : 0;
+    if (!next.time && !(endsAt > startsAt)) next.time = "It has to finish after it starts";
+    setEventErrors(next);
+    if (Object.keys(next).length > 0) {
+      setToast("Nearly there — the fields marked * still need something.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const created = await api("/events", {
+        method: "POST",
+        token,
+        body: { title: eventForm.title, note: eventForm.note, road: eventForm.road, address: eventForm.address, startsAt, endsAt },
+      });
+      setEvents((list) => [created, ...list.filter((e) => e.id !== created.id)]);
+      setEventForm(EMPTY_EVENT);
+      setEventView({ event: created, items: [] });
+      setEventId(created.id);
+      setScreen("event");
+      setToast(`${eventWhen(created.startsAt, created.endsAt)} — now put the things out and tag them to it.`);
+    } catch (e) {
+      setEventErrors(e.field ? { [e.field]: e.message } : { _form: e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const callOffEvent = async (id) => {
+    try {
+      await api(`/events/${id}`, { method: "DELETE", token });
+      setEvents((list) => list.filter((e) => e.id !== id));
+      setEventView(null);
+      setEventId(null);
+      setScreen("events");
+      setToast("Called off. Anything you'd already put out stays live on its own.");
+    } catch (e) {
+      setToast(e.message);
     }
   };
 
@@ -4142,6 +4263,16 @@ export default function Doorstep() {
                   </span>
                   <span className="link-go" aria-hidden="true">›</span>
                 </button>
+                <button onClick={() => setScreen("events")}>
+                  <span className="link-ic amber" aria-hidden="true">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3.5 10.5 12 4l8.5 6.5V20a1 1 0 0 1-1 1h-4.5v-5.5h-6V21H4.5a1 1 0 0 1-1-1z" /><path d="M8 7.5V4h3" /></svg>
+                  </span>
+                  <span className="link-copy">
+                    Open doorsteps
+                    <span>Whole-doorstep clear-outs near you</span>
+                  </span>
+                  <span className="link-go" aria-hidden="true">›</span>
+                </button>
                 <button onClick={() => setScreen("impact")}>
                   <span className="link-ic blue" aria-hidden="true">
                     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18M5.5 12.5L12 19l6.5-6.5" /></svg>
@@ -4230,6 +4361,265 @@ export default function Doorstep() {
           {toast && <div className="toast" role="status">{toast}</div>}
         </div>
       </div>
+    );
+  }
+
+  /* ---------------- open doorsteps ---------------- */
+
+  /* The British yard sale, timed: one household putting the whole lot at the
+     door for an afternoon, browsed as a little page of its own. */
+  if (screen === "events") {
+    return (
+      <SubScreen title="Open doorsteps" time={timeNow} toast={toast} sheets={sheets} onBack={() => setScreen("profile")}>
+        <p className="od-intro">
+          A whole doorstep at once — someone moving out, or clearing a loft, with everything at the door for a
+          few hours. Claim what you want ahead, or simply turn up.
+        </p>
+
+        {token && (
+          <button className="od-start" onClick={startEvent}>
+            <span className="link-ic amber" aria-hidden="true">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
+            </span>
+            <span className="link-copy">
+              Start an open doorstep
+              <span>Clearing out? Put the lot up as one afternoon</span>
+            </span>
+            <span className="link-go" aria-hidden="true">›</span>
+          </button>
+        )}
+
+        {events.length === 0 ? (
+          <div className="wish-empty">
+            <b>No open doorsteps just now</b>
+            <span>When a neighbour clears a loft or moves out, the whole lot turns up here for an afternoon.</span>
+          </div>
+        ) : (
+          <div className="od-list">
+            {events.map((e, i) => {
+              const live = e.startsAt <= now && now < e.endsAt;
+              return (
+                <article
+                  key={e.id}
+                  className={`od-card ${live ? "live" : ""}`}
+                  style={{ "--i": Math.min(i, 6) }}
+                  onClick={() => {
+                    setEventId(e.id);
+                    setEventView(null);
+                    setScreen("event");
+                  }}
+                >
+                  <div className="od-card-top">
+                    <b>{e.title}</b>
+                    {live && <span className="od-now">Happening now</span>}
+                  </div>
+                  <p className="od-when">{eventWhen(e.startsAt, e.endsAt)}</p>
+                  <p className="od-where">{[e.road, e.owner.area, e.dist].filter(Boolean).join(" · ")}</p>
+                  <p className="od-count">
+                    {e.itemCount === 0 ? "Nothing out yet" : e.itemCount === 1 ? "1 thing out" : `${e.itemCount} things out`}
+                    {e.mine ? " · Yours" : ` · ${e.owner.name}`}
+                  </p>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </SubScreen>
+    );
+  }
+
+  if (screen === "event") {
+    const ev = eventView && eventView.event;
+    const lot = (eventView && eventView.items) || [];
+    const live = ev != null && ev.startsAt <= now && now < ev.endsAt;
+    return (
+      <SubScreen
+        title="Open doorstep"
+        time={timeNow}
+        toast={toast}
+        sheets={sheets}
+        onBack={() => {
+          setEventView(null);
+          setScreen("events");
+        }}
+      >
+        {!ev ? (
+          <p className="empty">Fetching the doorstep…</p>
+        ) : (
+          <>
+            <div className={`od-hero ${live ? "live" : ""}`}>
+              {live && <span className="od-now">Happening now</span>}
+              <h2>{ev.title}</h2>
+              <p className="od-hero-when">{eventWhen(ev.startsAt, ev.endsAt)}</p>
+              <p className="od-hero-where">{ev.address || ev.road}</p>
+              {!ev.address && <p className="od-hero-hint">The house number appears the moment it starts.</p>}
+              {ev.note && <p className="od-hero-note">{ev.note}</p>}
+              <p className="od-hero-who">
+                {[ev.mine ? "Yours" : ev.owner.name, ev.owner.area, ev.dist].filter(Boolean).join(" · ")}
+              </p>
+              {ev.mine && (
+                <button className="od-call-off" onClick={() => callOffEvent(ev.id)}>
+                  Call it off
+                </button>
+              )}
+            </div>
+
+            {lot.length === 0 ? (
+              <div className="wish-empty">
+                <b>Nothing out yet</b>
+                <span>
+                  {ev.mine
+                    ? "List the things you're putting out and tag them to this — they'll all show here."
+                    : "Have another look nearer the time. Things go up as they come out of the loft."}
+                </span>
+              </div>
+            ) : (
+              /* the feed's own card, so a thing inside a sale looks and taps
+                 exactly like a thing anywhere else */
+              <div className="item-grid">
+                {lot.map((item, index) => {
+                  const remaining = item.expiresAt - now;
+                  const urgent = remaining < 15 * 60 * 1000;
+                  const soon = remaining < 60 * 60 * 1000;
+                  const mine = item.status === "yours";
+                  const gone = item.status === "taken";
+                  return (
+                    <article
+                      key={item.id}
+                      className={`gcard ${urgent && !gone ? "urgent" : ""} ${gone && !item.owner ? "taken" : ""}`}
+                      style={{ "--i": Math.min(index, 6) }}
+                      onClick={() => {
+                        /* the detail screen reads from the feed's list, so
+                           anything opened from a sale joins it first —
+                           otherwise a card that was never on the home screen
+                           lands on "that one's gone" */
+                        setItems((list) => (list.some((x) => x.id === item.id) ? list : [...list, item]));
+                        setDetailId(item.id);
+                        setShot(0);
+                        setScreen("detail");
+                      }}
+                    >
+                      <div className="gcard-photo">
+                        {pictureOf(item) ? (
+                          <img src={pictureOf(item)} alt="" loading="lazy" />
+                        ) : (
+                          <span className="gcard-glyph">
+                            <Glyph kind={item.kind} size={54} />
+                          </span>
+                        )}
+                        {!item.owner && (
+                          <button
+                            className={`save-star ${item.saved ? "on" : ""}`}
+                            aria-label={item.saved ? `Remove ${item.title} from saved` : `Save ${item.title}`}
+                            aria-pressed={item.saved}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSave(item);
+                            }}
+                          >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill={item.saved ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
+                              <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z" />
+                            </svg>
+                          </button>
+                        )}
+                        <span className={`gcard-timer ${item.lastOrders ? "last-orders" : urgent ? "urgent" : soon ? "soon" : ""}`}>
+                          {item.lastOrders ? `Last orders · ${formatLeft(remaining)}` : formatLeft(remaining)}
+                        </span>
+                        {item.dist && <span className="gcard-dist">{item.dist}</span>}
+                        {item.type === "food" && !gone && !mine && !item.owner && <span className="gcard-food">Food</span>}
+                        {(gone || mine || item.owner) && (
+                          <span className="gcard-state">{mine ? "Yours" : item.owner ? "Your listing" : "Claimed"}</span>
+                        )}
+                      </div>
+                      <div className="gcard-copy">
+                        <b>{item.title}</b>
+                        <span>{item.owner ? "Your doorstep" : [item.dist, item.road].filter(Boolean).join(" · ")}</span>
+                        {item.type === "food" && item.useBy && <span className="useby">Eat by {untilUseBy(item.useBy)}</span>}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </SubScreen>
+    );
+  }
+
+  if (screen === "event-new") {
+    const timeTrouble = eventErrors.time || eventErrors.startsAt || eventErrors.endsAt;
+    return (
+      <SubScreen
+        title="Start an open doorstep"
+        time={timeNow}
+        toast={toast}
+        sheets={sheets}
+        onBack={() => {
+          setScreen("events");
+          setEventErrors({});
+        }}
+      >
+        <p className="od-intro">
+          One doorstep, one afternoon, the lot at once. List the things separately afterwards and tag them to
+          this — they'll all stay up until it finishes.
+        </p>
+
+        <div className={`field ${eventErrors.title ? "bad" : ""}`}>
+          <label htmlFor="od-title">
+            What to call it <Req />
+          </label>
+          <input id="od-title" value={eventForm.title} onChange={setE("title")} placeholder="Whole-flat clear-out" />
+          {eventErrors.title && <p className="field-note">{eventErrors.title}</p>}
+        </div>
+
+        <div className="field">
+          <label htmlFor="od-note">Anything worth saying</label>
+          <input id="od-note" value={eventForm.note} onChange={setE("note")} placeholder="Furniture, books and rather a lot of plant pots" />
+        </div>
+
+        <div className={`field ${eventErrors.date ? "bad" : ""}`}>
+          <label htmlFor="od-date">
+            Which day <Req />
+          </label>
+          <input id="od-date" type="date" value={eventForm.date} onChange={setE("date")} />
+          {eventErrors.date && <p className="field-note">{eventErrors.date}</p>}
+        </div>
+
+        <div className={`field ${timeTrouble ? "bad" : ""}`}>
+          <label htmlFor="od-start">
+            From, until <Req />
+          </label>
+          <div className="od-times">
+            <input id="od-start" type="time" value={eventForm.start} onChange={setE("start")} />
+            <span aria-hidden="true">–</span>
+            <input aria-label="Finish time" type="time" value={eventForm.end} onChange={setE("end")} />
+          </div>
+          {timeTrouble && <p className="field-note">{timeTrouble}</p>}
+        </div>
+
+        <div className="field">
+          <label htmlFor="od-road">Road</label>
+          <input id="od-road" value={eventForm.road} onChange={setE("road")} placeholder="Wilton Way, E8" />
+        </div>
+
+        <div className={`field ${eventErrors.address ? "bad" : ""}`}>
+          <label htmlFor="od-address">
+            Full address — shown once it starts <Req />
+          </label>
+          <input id="od-address" value={eventForm.address} onChange={setE("address")} placeholder="9 Wilton Way, London E8 3EP" />
+          {eventErrors.address && <p className="field-note">{eventErrors.address}</p>}
+        </div>
+
+        <button className="primary-btn" onClick={submitEvent} disabled={busy}>
+          {busy ? "Starting" : "Start the open doorstep"}
+        </button>
+        {eventErrors._form && <p className="field-note form-note">{eventErrors._form}</p>}
+        <p className="spot-small-print">
+          Neighbours see the road until the doors open, then the number. Everything waits on your own property —
+          doorstep, garden, porch or lobby. Never the pavement.
+        </p>
+      </SubScreen>
     );
   }
 
@@ -4393,6 +4783,8 @@ export default function Doorstep() {
 
   if (screen === "give") {
     const upholstered = UPHOLSTERY_RE.test(give.title);
+    /* only your own sales, and only ones with time left on them */
+    const myEvents = events.filter((e) => e.mine && e.endsAt > now);
     return (
       <div className="ds-root">
         <div className="ds-phone on-home">
@@ -4742,6 +5134,27 @@ export default function Doorstep() {
                 ))}
               </div>
 
+              )}
+
+              {!give.wanted && myEvents.length > 0 && (
+                <div className="field">
+                  <label>Part of an open doorstep?</label>
+                  <div className="chips od-chips" role="group" aria-label="Attach this to an open doorstep">
+                    {myEvents.map((e) => (
+                      <button
+                        key={e.id}
+                        className="chip"
+                        aria-pressed={give.eventId === e.id}
+                        onClick={() => setGive((g) => ({ ...g, eventId: g.eventId === e.id ? null : e.id }))}
+                      >
+                        Part of: {e.title}
+                      </button>
+                    ))}
+                  </div>
+                  {give.eventId != null && (
+                    <p className="od-chip-hint">It'll stay up until the open doorstep finishes, whatever you pick below.</p>
+                  )}
+                </div>
               )}
 
               {!give.wanted && (
@@ -5163,17 +5576,6 @@ export default function Doorstep() {
                   </button>
                 )}
               </div>
-            )}
-
-            {!q.trim() && (
-              <button className="map-peek" onClick={() => setScreen("map")} aria-label="Open the map">
-                <div className="map-peek-canvas" ref={miniMapRef} aria-hidden="true" />
-                <span className="map-peek-chip">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0z" /><circle cx="12" cy="10" r="3" /></svg>
-                  {items.filter((i) => i.lat != null).length} pinned around you
-                </span>
-                <span className="map-peek-open">Open the map ›</span>
-              </button>
             )}
 
             {/* One line, and only once the road has three verified households

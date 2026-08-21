@@ -238,6 +238,7 @@ const castItem = (it) =>
     hidden_at: num(it.hidden_at),
     use_by: num(it.use_by),
     portions: num(it.portions),
+    event_id: num(it.event_id),
   };
 
 const castUser = (u) => u && { ...u, id: num(u.id), created_at: num(u.created_at) };
@@ -617,6 +618,9 @@ function publicItem(it, user, now, ctx) {
        a passport only exists once a thing has a story to tell */
     passport: it.lineage_id ? (ctx.lineages && ctx.lineages.get(it.lineage_id)) || null : null,
     saved: ctx.saved.has(it.id),
+    /* null for almost everything: only things put out for an open doorstep
+       belong to one, and the client shows the sale's badge off the back of it */
+    eventId: num(it.event_id) || null,
     windowMs: it.window_ms,
     expiresAt: it.expires_at,
     status: mine ? "yours" : claimActive ? "taken" : "live",
@@ -1170,6 +1174,7 @@ app.post(
       underCover = false,
       dibs = false,
       passFrom = null,
+      eventId = null,
     } = req.body || {};
     if (!["instant", "fair"].includes(claimMode)) return fail(res, 400, "First to claim, or you pick", "claimMode");
     const isAsk = wanted === true;
@@ -1251,10 +1256,30 @@ app.post(
       }
     }
 
+    /* Putting it out for one of your own open doorsteps. The window is
+       pulled back to the sale's finish because a doorstep sale ends when the
+       sale ends — a thing advertised as part of Saturday afternoon must not
+       still be sitting live on Sunday morning with nobody home to hand it
+       over. An eventId that isn't theirs, or has already finished, is
+       ignored rather than refused, for the same reason a broken passFrom is:
+       a stale chip left on the give form must never stop someone listing. */
+    let joinEventId = null;
+    const eventJoin = Number(eventId);
+    if (eventJoin && Number.isSafeInteger(eventJoin) && !isAsk) {
+      const ev = await one("SELECT id, ends_at FROM events WHERE id = $1 AND owner_id = $2 AND hidden_at IS NULL", [
+        eventJoin,
+        req.user.id,
+      ]);
+      if (ev && num(ev.ends_at) > now) {
+        joinEventId = num(ev.id);
+        windowMs = num(ev.ends_at) - now;
+      }
+    }
+
     /* the item sits on the giver's own property, so it inherits their coordinates */
     const row = await one(
-      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, photo, photos, spot, postcode, lat, lng, type, use_by, portions, details, wanted, claim_mode, under_cover, dibs, lineage_id, review_flag)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) RETURNING *`,
+      `INSERT INTO items (owner_id, title, note, cat, kind, road, address, dist, window_ms, expires_at, created_at, photo, photos, spot, postcode, lat, lng, type, use_by, portions, details, wanted, claim_mode, under_cover, dibs, lineage_id, review_flag, event_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) RETURNING *`,
       [
         req.user.id,
         title.trim(),
@@ -1282,6 +1307,7 @@ app.post(
         dibs === true && !isAsk,
         lineageId,
         reviewFlag,
+        joinEventId,
       ]
     );
 
@@ -1509,6 +1535,194 @@ app.post(
     const hidden = num(updated.reports) >= SPOT_REPORTS_TO_HIDE;
     if (hidden && s.hidden_at == null) await query("UPDATE spots SET hidden_at = $1 WHERE id = $2", [now, s.id]);
     res.json({ ok: true, hidden });
+  })
+);
+
+/* ---- open doorsteps ----
+   The British yard sale, with a clock on it. Someone moving out or clearing
+   a loft lists the whole lot as one event — "Open doorstep at Wilton Way,
+   Saturday 2 to 4" — and neighbours either claim ahead or turn up on the
+   day. The event is a frame around ordinary listings rather than a container
+   for them, so anything in it can still be claimed, chatted about and
+   collected exactly as it would be from the feed. */
+
+/* Half an hour is the shortest walk anyone will make; eight hours is a long
+   day on a doorstep, and a whole weekend belongs in two events rather than
+   one. Two weeks is as far ahead as a neighbour will plan a Saturday. */
+const EVENT_MIN_MS = 30 * 60 * 1000;
+const EVENT_MAX_MS = 8 * 60 * 60 * 1000;
+const EVENT_MAX_AHEAD_MS = 14 * 24 * 60 * 60 * 1000;
+
+const castEvent = (e) =>
+  e && {
+    ...e,
+    id: num(e.id),
+    owner_id: num(e.owner_id),
+    starts_at: num(e.starts_at),
+    ends_at: num(e.ends_at),
+    created_at: num(e.created_at),
+    hidden_at: num(e.hidden_at),
+  };
+
+/* The address rule, and why it is not the item rule: a sale is an invitation
+   to a house at a stated hour, so once the doors are open the number belongs
+   on screen — turning up is the whole point of the thing. Before it starts,
+   a stranger has no business knowing which house on the road is about to be
+   full of strangers, so they get the road and nothing more. The owner sees
+   their own address throughout. The pin follows the same reasoning in coarse
+   form, snapped to the same ~110m grid an unclaimed listing uses. */
+function publicEvent(e, user, now, itemCount = 0) {
+  const mine = e.owner_id === user.id;
+  const running = e.starts_at <= now && e.ends_at > now;
+  const miles = e.lat != null && user.lat != null ? milesBetween(user.lat, user.lng, e.lat, e.lng) : null;
+  const pin = e.lat != null ? (mine ? { lat: e.lat, lng: e.lng } : approxCoords(e.lat, e.lng)) : null;
+  return {
+    id: e.id,
+    title: e.title,
+    note: e.note,
+    road: e.road,
+    startsAt: e.starts_at,
+    endsAt: e.ends_at,
+    running,
+    itemCount,
+    owner: { name: String(e.owner_name || "").split(/\s+/)[0], area: areaFor(e.owner_postcode) },
+    mine,
+    dist: miles != null ? formatMiles(miles) : null,
+    lat: pin ? pin.lat : null,
+    lng: pin ? pin.lng : null,
+    ...(mine || running ? { address: e.address } : {}),
+  };
+}
+
+app.post(
+  "/api/events",
+  auth,
+  wrap(async (req, res) => {
+    const { title = "", note = "", road = "", address = "", startsAt, endsAt } = req.body || {};
+    if (!String(title).trim()) return fail(res, 400, "Give the open doorstep a name", "title");
+    if (!String(address).trim()) return fail(res, 400, "We need the address neighbours will come to", "address");
+
+    const from = Number(startsAt);
+    const to = Number(endsAt);
+    if (!Number.isFinite(from) || !from) return fail(res, 400, "When does it start?", "startsAt");
+    if (!Number.isFinite(to) || !to) return fail(res, 400, "When does it finish?", "endsAt");
+    if (to <= from) return fail(res, 400, "It has to finish after it starts", "endsAt");
+
+    const span = to - from;
+    if (span < EVENT_MIN_MS) return fail(res, 400, "Half an hour is the shortest that's worth anyone's walk", "endsAt");
+    if (span > EVENT_MAX_MS) return fail(res, 400, "Eight hours is the longest — a whole weekend is two open doorsteps", "endsAt");
+
+    const now = Date.now();
+    /* a minute of slack: the phone that picked the time and the server that
+       checks it are never on the same second, and "starting now" must not
+       bounce because the request spent a moment in flight */
+    if (from < now - 60 * 1000) return fail(res, 400, "That time has already passed", "startsAt");
+    if (from > now + EVENT_MAX_AHEAD_MS) return fail(res, 400, "Two weeks ahead is as far as anyone plans a Saturday", "startsAt");
+
+    /* the sale happens at the owner's own front door, so it inherits their
+       coordinates the way a listing does */
+    const row = await one(
+      `INSERT INTO events (owner_id, title, note, road, address, postcode, lat, lng, starts_at, ends_at, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [
+        req.user.id,
+        String(title).trim(),
+        String(note).trim(),
+        String(road).trim() || req.user.road || "your road",
+        String(address).trim(),
+        req.user.postcode,
+        req.user.lat,
+        req.user.lng,
+        from,
+        to,
+        now,
+      ]
+    );
+    const e = { ...castEvent(row), owner_name: req.user.name, owner_postcode: req.user.postcode };
+    res.status(201).json(publicEvent(e, req.user, now, 0));
+  })
+);
+
+app.get(
+  "/api/events",
+  maybeAuth,
+  wrap(async (req, res) => {
+    const now = Date.now();
+    /* soonest first, because the only question anyone brings to this screen
+       is what is on this weekend; anything already finished is history */
+    const rows = (
+      await query(
+        `SELECT e.*, u.name AS owner_name, u.postcode AS owner_postcode
+         FROM events e JOIN users u ON u.id = e.owner_id
+         WHERE e.ends_at > $1 AND e.hidden_at IS NULL
+         ORDER BY e.starts_at, e.id LIMIT 20`,
+        [now]
+      )
+    ).map(castEvent);
+
+    /* one tally for the whole page rather than a count per card — the same
+       reason givers and saves are fetched once for the feed */
+    const counts = new Map();
+    if (rows.length) {
+      const tally = await query(
+        `SELECT event_id, COUNT(*) AS n FROM items
+         WHERE event_id = ANY($1::bigint[]) AND expires_at > $2 AND hidden_at IS NULL
+         GROUP BY event_id`,
+        [rows.map((e) => e.id), now]
+      );
+      for (const t of tally) counts.set(num(t.event_id), num(t.n));
+    }
+
+    res.json({ events: rows.map((e) => publicEvent(e, req.user, now, counts.get(e.id) || 0)) });
+  })
+);
+
+app.get(
+  "/api/events/:id",
+  maybeAuth,
+  wrap(async (req, res) => {
+    const now = Date.now();
+    const row = await one(
+      `SELECT e.*, u.name AS owner_name, u.postcode AS owner_postcode
+       FROM events e JOIN users u ON u.id = e.owner_id WHERE e.id = $1`,
+      [req.params.id]
+    );
+    if (!row || row.hidden_at != null) return fail(res, 404, "That open doorstep doesn't exist");
+    const e = castEvent(row);
+
+    const rows = (
+      await query(
+        "SELECT * FROM items WHERE event_id = $1 AND expires_at > $2 AND hidden_at IS NULL ORDER BY expires_at, id",
+        [e.id, now]
+      )
+    ).map(castItem);
+
+    /* the same shaping the feed uses, so a card inside a sale is the same
+       card as everywhere else — photo, timer, distance and claim state all
+       behave identically once someone taps through */
+    const ctx = await itemContext(rows, req.user);
+    res.json({
+      event: publicEvent(e, req.user, now, rows.length),
+      items: rows.map((it) => publicItem(it, req.user, now, ctx)),
+    });
+  })
+);
+
+app.delete(
+  "/api/events/:id",
+  auth,
+  wrap(async (req, res) => {
+    const row = await one("SELECT * FROM events WHERE id = $1 AND owner_id = $2 AND hidden_at IS NULL", [
+      req.params.id,
+      req.user.id,
+    ]);
+    if (!row) return fail(res, 404, "That isn't one of your open doorsteps");
+    const now = Date.now();
+    /* the sale is off, but the things are still on the doorstep: each
+       listing keeps its own window and simply stops pointing at an event */
+    await query("UPDATE events SET hidden_at = $1 WHERE id = $2", [now, row.id]);
+    await query("UPDATE items SET event_id = NULL WHERE event_id = $1", [row.id]);
+    res.json({ ok: true });
   })
 );
 
@@ -3010,6 +3224,11 @@ app.delete(
       await q("DELETE FROM wishes WHERE user_id = $1", [id]);
       await q("DELETE FROM notifications WHERE user_id = $1", [id]);
       await q("DELETE FROM saves WHERE user_id = $1", [id]);
+      /* an open doorstep is the neighbour's own event, so it goes with them;
+         the things they put out for it stay standing on their own windows,
+         simply no longer pointing at a sale that no longer exists */
+      await q("UPDATE items SET event_id = NULL WHERE event_id IN (SELECT id FROM events WHERE owner_id = $1)", [id]);
+      await q("DELETE FROM events WHERE owner_id = $1", [id]);
       /* spotted piles are theirs in authorship even if not in property, so
          they go entirely — takes and reports on other people's spots first,
          then their own spots, whose takes and reports cascade with them */

@@ -1785,3 +1785,110 @@ test("a street with three households gets a page; one household alone does not",
   assert.equal(ours.mine, true, "the viewer's own road is marked so it can be highlighted");
   assert.ok(board.body.streets.every((s) => s.neighbours >= 3), "the board never names a street below the floor");
 });
+
+/* ---- open doorsteps ---- */
+
+test("an open doorstep gathers its listings, keeps the door private until it opens, and outlives being called off", async () => {
+  const giver = await newNeighbour("Loft Clearer");
+  const stranger = await newNeighbour("Curious Neighbour");
+
+  const now = Date.now();
+  const running = await call("/events", {
+    method: "POST",
+    token: giver,
+    body: {
+      title: "Whole-flat clear-out",
+      note: "Everything at the door before the van comes",
+      road: "Wilton Way, E8",
+      address: "9 Wilton Way, London E8 3EP",
+      startsAt: now,
+      endsAt: now + 2 * 60 * 60 * 1000,
+    },
+  });
+  assert.equal(running.status, 201);
+  assert.equal(running.body.running, true);
+  assert.equal(running.body.itemCount, 0);
+  assert.equal(running.body.address, "9 Wilton Way, London E8 3EP", "your own sale always shows you its address");
+
+  /* the window has to be worth a walk */
+  const tooShort = await call("/events", {
+    method: "POST",
+    token: giver,
+    body: {
+      title: "Ten-minute sale",
+      road: "Wilton Way, E8",
+      address: "9 Wilton Way, London E8 3EP",
+      startsAt: now + 60_000,
+      endsAt: now + 60_000 + 10 * 60 * 1000,
+    },
+  });
+  assert.equal(tooShort.status, 400);
+  assert.equal(tooShort.body.field, "endsAt");
+
+  /* a doorstep sale ends when the sale ends: the fifteen minutes asked for
+     here must be overruled by the event's own finish */
+  const listed = await call("/items", {
+    method: "POST",
+    token: giver,
+    body: {
+      title: "Box of paperbacks",
+      cat: "Furniture",
+      road: "Wilton Way, E8",
+      address: "9 Wilton Way, London E8 3EP",
+      windowMinutes: 15,
+      eventId: running.body.id,
+    },
+  });
+  assert.equal(listed.status, 201);
+  assert.equal(listed.body.eventId, running.body.id);
+  assert.equal(listed.body.expiresAt, running.body.endsAt, "a listing in a sale expires when the sale does");
+
+  const listing = await call("/events", { token: stranger });
+  assert.equal(listing.status, 200);
+  const seen = listing.body.events.find((e) => e.id === running.body.id);
+  assert.ok(seen, "a live sale is on the list for everyone");
+  assert.equal(seen.itemCount, 1);
+  assert.equal(seen.mine, false);
+  assert.equal(seen.owner.name, "Loft", "first names only, the same as a listing's giver");
+
+  /* one still to come: before the doors open a stranger gets the road only */
+  const later = await call("/events", {
+    method: "POST",
+    token: giver,
+    body: {
+      title: "Saturday clear-out",
+      road: "Wilton Way, E8",
+      address: "9 Wilton Way, London E8 3EP",
+      startsAt: now + 3 * 24 * 60 * 60 * 1000,
+      endsAt: now + 3 * 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000,
+    },
+  });
+  assert.equal(later.status, 201);
+
+  const early = await call(`/events/${later.body.id}`, { token: stranger });
+  assert.equal(early.status, 200);
+  assert.equal(early.body.event.address, undefined, "nobody learns which house it is before the sale starts");
+  assert.equal(early.body.event.road, "Wilton Way, E8");
+
+  const openNow = await call(`/events/${running.body.id}`, { token: stranger });
+  assert.equal(openNow.status, 200);
+  assert.equal(openNow.body.event.address, "9 Wilton Way, London E8 3EP", "once it's running, turning up is the point");
+  assert.equal(openNow.body.items.length, 1);
+  assert.equal(openNow.body.items[0].title, "Box of paperbacks");
+
+  /* calling it off is the owner's to do, and only the owner's */
+  const nosy = await call(`/events/${running.body.id}`, { method: "DELETE", token: stranger });
+  assert.ok(nosy.status === 403 || nosy.status === 404, "a stranger can't call off someone else's sale");
+
+  const called_off = await call(`/events/${running.body.id}`, { method: "DELETE", token: giver });
+  assert.equal(called_off.status, 200);
+  assert.equal((await call(`/events/${running.body.id}`, { token: stranger })).status, 404);
+
+  /* the sale is off, but the box of books is still on the doorstep */
+  const mine = await call("/me/stuff", { token: giver });
+  assert.equal(mine.status, 200);
+  const still = mine.body.listed.find((i) => i.id === listed.body.id);
+  assert.ok(still, "the listing survives its sale being called off");
+  assert.equal(still.eventId, null, "it simply stops pointing at an event");
+  assert.ok(still.expiresAt > Date.now(), "and keeps the window it was given");
+});

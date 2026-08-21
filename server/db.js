@@ -412,6 +412,30 @@ CREATE TABLE IF NOT EXISTS spot_reports (
   at      BIGINT NOT NULL,
   PRIMARY KEY (spot_id, user_id)
 );
+
+/* "Open doorstep": the British yard sale with a clock on it. A household
+   moving out or clearing a loft puts the whole lot at the door for one
+   afternoon, and neighbours either claim ahead or simply turn up. The event
+   holds the when and the where; the things themselves stay ordinary items,
+   because a neighbour should be able to claim one and arrange a handover
+   exactly as they would from the feed. */
+CREATE TABLE IF NOT EXISTS events (
+  id         BIGSERIAL PRIMARY KEY,
+  owner_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title      TEXT NOT NULL,
+  note       TEXT NOT NULL DEFAULT '',
+  road       TEXT NOT NULL,
+  address    TEXT NOT NULL,
+  postcode   TEXT,
+  lat        DOUBLE PRECISION,
+  lng        DOUBLE PRECISION,
+  starts_at  BIGINT NOT NULL,
+  ends_at    BIGINT NOT NULL,
+  created_at BIGINT NOT NULL,
+  hidden_at  BIGINT
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_ends ON events(ends_at);
 `;
 
 export async function initDb() {
@@ -441,6 +465,11 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_accepted_at BIGINT;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS lineage_id TEXT;
     ALTER TABLE items ADD COLUMN IF NOT EXISTS review_flag TEXT;
+    /* Which open doorstep a listing was put out for. Deliberately a plain
+       BIGINT with no foreign key: the sale is a frame around the thing, not
+       a container for it, so calling off the sale must leave every listing
+       standing on its own doorstep rather than cascade them into oblivion. */
+    ALTER TABLE items ADD COLUMN IF NOT EXISTS event_id BIGINT;
   `);
 }
 

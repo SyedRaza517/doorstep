@@ -5015,3 +5015,206 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
 }
 
 .street-strip-go { flex: none; font-size: 17px; color: rgba(35, 74, 59, 0.35); }
+/* ---------- open doorsteps ---------- */
+
+/* The British yard sale, timed. A sale is a warmer thing than a listing — it
+   is an invitation — so its cards sit on --render with a soft brick left
+   edge, and only the one that is actually happening lights up in --signal. */
+
+.od-intro {
+  font-family: var(--body);
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(35, 74, 59, 0.72);
+  margin: 0 0 14px;
+}
+
+.od-start {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  background: var(--card);
+  padding: 12px;
+  margin: 0 0 16px;
+  cursor: pointer;
+  transition: transform var(--quick) var(--settle), box-shadow var(--quick) var(--settle);
+}
+.od-start:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(20, 38, 31, 0.1); }
+.od-start:active { transform: scale(0.99); }
+
+.link-ic.amber { background: rgba(245, 197, 24, 0.3); color: #7a5c00; }
+
+.od-list { display: flex; flex-direction: column; gap: 12px; }
+
+.od-card {
+  position: relative;
+  border: 1px solid var(--rule);
+  border-left: 3px solid rgba(166, 75, 42, 0.55);
+  border-radius: 14px;
+  background: var(--card);
+  padding: 13px 14px;
+  cursor: pointer;
+  /* the same staggered arrival the feed's cards use, so the two screens
+     feel like one app; --i is capped by the component */
+  opacity: 0;
+  animation: od-rise var(--move) var(--spring) forwards;
+  animation-delay: calc(var(--i, 0) * 40ms);
+  transition: transform var(--quick) var(--settle), box-shadow var(--quick) var(--settle);
+}
+.od-card:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(20, 38, 31, 0.1); }
+.od-card:active { transform: scale(0.99); }
+.od-card.live { border-left-color: var(--signal); background: rgba(245, 197, 24, 0.08); }
+
+@keyframes od-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.od-card-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.od-card-top b {
+  font-family: var(--display);
+  font-size: 15.5px;
+  color: var(--railing);
+  line-height: 1.25;
+}
+
+/* "Happening now" is the one thing on this screen worth a heartbeat — a
+   quiet pulse of opacity, nothing that moves the layout */
+.od-now {
+  flex: none;
+  font-family: var(--body);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--signal);
+  border-radius: 999px;
+  padding: 3px 8px;
+  animation: od-flash 2.4s var(--settle) infinite;
+}
+
+@keyframes od-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.66; }
+}
+
+.od-when {
+  font-family: var(--body);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--brick);
+  margin: 5px 0 0;
+}
+.od-where,
+.od-count {
+  font-family: var(--body);
+  font-size: 12.5px;
+  color: rgba(35, 74, 59, 0.62);
+  margin: 3px 0 0;
+}
+
+/* one event, as its own little page */
+
+.od-hero {
+  position: relative;
+  border-radius: 16px;
+  background: var(--render);
+  padding: 16px 16px 18px;
+  margin: 0 0 18px;
+  opacity: 0;
+  animation: od-rise var(--grand) var(--spring) forwards;
+}
+.od-hero.live { background: rgba(245, 197, 24, 0.16); }
+.od-hero .od-now { position: absolute; top: 14px; right: 14px; }
+.od-hero h2 {
+  font-family: var(--display);
+  font-size: 21px;
+  line-height: 1.2;
+  color: var(--railing);
+  margin: 0 84px 0 0;
+}
+.od-hero-when {
+  font-family: var(--body);
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--brick);
+  margin: 8px 0 0;
+}
+.od-hero-where {
+  font-family: var(--body);
+  font-size: 13.5px;
+  color: var(--railing);
+  margin: 4px 0 0;
+}
+.od-hero-hint,
+.od-hero-who {
+  font-family: var(--body);
+  font-size: 12px;
+  color: rgba(35, 74, 59, 0.6);
+  margin: 3px 0 0;
+}
+.od-hero-note {
+  font-family: var(--body);
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(35, 74, 59, 0.8);
+  margin: 10px 0 0;
+}
+.od-call-off {
+  font-family: var(--body);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--brick);
+  background: none;
+  border: none;
+  padding: 10px 0 0;
+  cursor: pointer;
+  transition: opacity var(--quick) var(--settle);
+}
+.od-call-off:hover { opacity: 0.7; }
+
+/* the compose form's paired time pickers */
+
+.od-times { display: flex; align-items: center; gap: 8px; }
+.od-times input { flex: 1; min-width: 0; }
+.od-times span { font-family: var(--body); color: rgba(35, 74, 59, 0.45); }
+
+.od-chips { flex-wrap: wrap; }
+.od-chip-hint {
+  font-family: var(--body);
+  font-size: 12px;
+  color: rgba(166, 75, 42, 0.85);
+  margin: 8px 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* nothing here carries meaning that the movement was holding: the cards
+     simply arrive, and "happening now" stays lit rather than breathing */
+  .od-card,
+  .od-hero {
+    opacity: 1;
+    animation: none;
+  }
+  .od-now { animation: none; }
+  .od-start,
+  .od-card,
+  .od-call-off {
+    transition: none;
+  }
+  .od-start:hover,
+  .od-start:active,
+  .od-card:hover,
+  .od-card:active {
+    transform: none;
+  }
+}
