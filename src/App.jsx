@@ -812,7 +812,6 @@ export default function Doorstep() {
   const [autospec, setAutospec] = useState({ configured: false, busy: false, done: false, candidates: [] });
   const fileRef = useRef(null);
   const mapRef = useRef(null);
-  const miniMapRef = useRef(null);
   const mapObj = useRef(null);
 
   useClock();
@@ -1177,41 +1176,6 @@ export default function Doorstep() {
     const t = setTimeout(() => setToast(null), 4200);
     return () => clearTimeout(t);
   }, [toast]);
-
-  /* A postcard of the neighbourhood on the front page: the real map, pins
-     and all, with its hands tied — no panning, no zooming, no pointer at
-     all — so it scrolls like a picture and opens like a door. */
-  useEffect(() => {
-    if (screen !== "home" || !miniMapRef.current) return;
-    const centre = user && user.lat != null ? [user.lat, user.lng] : [51.5416, -0.0575];
-    const m = L.map(miniMapRef.current, {
-      zoomControl: false,
-      attributionControl: false,
-      dragging: false,
-      touchZoom: false,
-      scrollWheelZoom: false,
-      doubleClickZoom: false,
-      boxZoom: false,
-      keyboard: false,
-      tapHold: false,
-    });
-    m.setView(centre, 14);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(m);
-    for (const it of items.slice(0, 40)) {
-      if (it.lat == null) continue;
-      L.circleMarker([it.lat, it.lng], {
-        radius: 5,
-        color: "#FFFFFF",
-        weight: 1.5,
-        fillColor: it.wanted ? "#A64B2A" : "#234A3B",
-        fillOpacity: 0.95,
-      }).addTo(m);
-    }
-    if (user && user.lat != null) {
-      L.circleMarker(centre, { radius: 6, color: "#FFFFFF", weight: 2, fillColor: "#2B6CB0", fillOpacity: 1 }).addTo(m);
-    }
-    return () => m.remove();
-  }, [screen, items.length, user]);
 
   /* ---- map lifecycle ---- */
 
@@ -4837,12 +4801,6 @@ export default function Doorstep() {
                     <path d="M4 6.5h16M4 12h16M4 17.5h16" />
                   </svg>
                 </button>
-                <button aria-pressed={false} aria-label="Map view" onClick={() => setScreen("map")}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z" />
-                    <circle cx="12" cy="10" r="2.5" />
-                  </svg>
-                </button>
               </div>
 
               <button className="saved-toggle" aria-pressed={asksOnly} onClick={() => setAsksOnly((v) => !v)}>
@@ -4984,17 +4942,6 @@ export default function Doorstep() {
                   </button>
                 )}
               </div>
-            )}
-
-            {!q.trim() && (
-              <button className="map-peek" onClick={() => setScreen("map")} aria-label="Open the map">
-                <div className="map-peek-canvas" ref={miniMapRef} aria-hidden="true" />
-                <span className="map-peek-chip">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0z" /><circle cx="12" cy="10" r="3" /></svg>
-                  {items.filter((i) => i.lat != null).length} pinned around you
-                </span>
-                <span className="map-peek-open">Open the map ›</span>
-              </button>
             )}
 
             {recent.length > 0 && !q.trim() && (
@@ -5253,6 +5200,13 @@ export default function Doorstep() {
                 <path d="M5.5 9.5V20h13V9.5" />
               </svg>
               Near you
+            </button>
+            <button className="tabbar-btn" onClick={() => setScreen("map")}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z" />
+                <circle cx="12" cy="10" r="2.5" />
+              </svg>
+              Map
             </button>
             <button
               className="tabbar-btn"

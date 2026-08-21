@@ -571,7 +571,9 @@ test("a new wish immediately surfaces things that are already listed", async () 
 
   const wish = await call("/wishes", { method: "POST", token: wisher, body: { keyword: "dresser", cat: "Anything", radius: 2 } });
   assert.equal(wish.status, 201);
-  assert.equal(wish.body.alreadyOut, 1, "the wish should find what is already up");
+  /* at least the dresser, and quite possibly the neighbourhood's chests of
+     drawers too — the matcher understands that they are the same request */
+  assert.ok(wish.body.alreadyOut >= 1, "the wish should find what is already up");
 
   const notes = await call("/notifications", { token: wisher });
   const hit = notes.body.notifications.find((n) => n.title === "Welsh dresser");
@@ -1614,4 +1616,54 @@ test("chat reply suggestions degrade to nothing without a key", async () => {
      nothing, not even that the conversation exists */
   const nosy = await call(`/chats/${convId}/suggest`, { token: stranger });
   assert.equal(nosy.status, 404);
+});
+
+test("a wish hears about the thing it meant, not only the word it typed", async () => {
+  const giver = await newNeighbour("Vocabulary Giver");
+  const wisher = await newNeighbour("Vocabulary Wisher");
+
+  await call("/wishes", { method: "POST", token: wisher, body: { keyword: "bookcase", cat: "Anything", radius: 2 } });
+  await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Pine shelving unit", note: "Five shelves, sturdy.", cat: "Furniture", road: "Vocab Road, E8", address: "1 Vocab Road, London E8 3EP" },
+  });
+  const notes = await call("/notifications", { token: wisher });
+  assert.ok(
+    notes.body.notifications.some((n) => n.title === "Pine shelving unit"),
+    "shelving answers a wish for a bookcase"
+  );
+
+  /* and the widening must not become guessing: a desk is not a bookcase */
+  await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Oak writing desk", cat: "Furniture", road: "Vocab Road, E8", address: "2 Vocab Road, London E8 3EP" },
+  });
+  const after = await call("/notifications", { token: wisher });
+  assert.ok(!after.body.notifications.some((n) => n.title === "Oak writing desk"), "a desk is still not a bookcase");
+});
+
+test("wishes fold plurals and the spaces English cannot settle", async () => {
+  const giver = await newNeighbour("Plural Giver");
+  const wisher = await newNeighbour("Plural Wisher");
+
+  await call("/wishes", { method: "POST", token: wisher, body: { keyword: "high chair", cat: "Anything", radius: 2 } });
+  await call("/wishes", { method: "POST", token: wisher, body: { keyword: "boxes", cat: "Anything", radius: 2 } });
+
+  await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Highchair, wipes clean", cat: "Kids", road: "Vocab Road, E8", address: "3 Vocab Road, London E8 3EP" },
+  });
+  await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Moving box, sturdy", cat: "Furniture", road: "Vocab Road, E8", address: "4 Vocab Road, London E8 3EP" },
+  });
+
+  const notes = await call("/notifications", { token: wisher });
+  const titles = notes.body.notifications.map((n) => n.title);
+  assert.ok(titles.includes("Highchair, wipes clean"), "highchair answers 'high chair'");
+  assert.ok(titles.includes("Moving box, sturdy"), "one box answers a wish for boxes");
 });

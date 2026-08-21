@@ -18,6 +18,7 @@ import { lookupPostcode, hasAddressProvider } from "./address.js";
 import { areaFor } from "./geo.js";
 import { rainOutlook, rainWarning } from "./weather.js";
 import { aiConfigured, understand, suggestReplies } from "./ai.js";
+import { keywordMatches } from "./matching.js";
 import { specFromPhoto, hasCredentials } from "./autospec.js";
 import { checkListing, hasCredentials as hasModerationCredentials } from "./moderate.js";
 import { impactFor } from "./impact.js";
@@ -272,8 +273,8 @@ function pushTo(userId, payload) {
 /* Does this item satisfy this wish? Keyword, category and the wisher's own
    radius, measured from where they actually live. */
 function wishMatches(wish, item) {
-  const haystack = `${item.title} ${item.note} ${item.road}`.toLowerCase();
-  if (wish.keyword && !haystack.includes(wish.keyword.toLowerCase())) return null;
+  const haystack = `${item.title} ${item.note} ${item.road}`;
+  if (wish.keyword && !keywordMatches(wish.keyword, haystack)) return null;
   if (wish.cat !== "Anything" && wish.cat !== item.cat) return null;
   if (wish.ulat == null || item.lat == null) return null;
   const miles = milesBetween(wish.ulat, wish.ulng, item.lat, item.lng);
