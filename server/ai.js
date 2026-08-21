@@ -80,3 +80,31 @@ export async function suggestReplies({ role, title, messages }) {
   });
   return (response.parsed_output && response.parsed_output.replies) || null;
 }
+
+/* Hackney is one of the most multilingual boroughs in Britain, and a free
+   sofa is no use to someone who cannot read the sentence arranging its
+   collection. This is the smallest possible translator: one message in, one
+   message out, no explanation and no embellishment — the neighbour's own
+   words, in a language the reader has. */
+const TRANSLATE_SCHEMA = {
+  type: "object",
+  properties: {
+    translated: { type: "string", description: "The message rendered in the target language, and nothing else." },
+    sourceLanguage: { type: "string", description: "The language the original was written in, as its English name: 'Polish', 'Turkish', 'English'." },
+    alreadyTarget: { type: "boolean", description: "true when the original was already in the target language and has simply been echoed back." },
+  },
+  required: ["translated", "sourceLanguage", "alreadyTarget"],
+  additionalProperties: false,
+};
+
+export async function translate(text, targetLanguage) {
+  const response = await getClient().messages.parse({
+    model: MODEL,
+    max_tokens: 1000,
+    system:
+      `You translate short neighbourly messages about handing over free items in London into ${targetLanguage}. Keep it plain, warm and literal — the register of a text message between two people arranging a doorstep collection. Never add, omit or explain anything, and never answer the message: just translate it. If the text is already in ${targetLanguage}, set alreadyTarget true and echo it back unchanged.`,
+    output_config: { format: { type: "json_schema", schema: TRANSLATE_SCHEMA } },
+    messages: [{ role: "user", content: String(text).slice(0, 500) }],
+  });
+  return response.parsed_output || null;
+}

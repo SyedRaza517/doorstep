@@ -781,6 +781,14 @@ export default function Doorstep() {
      thread; null means "use the fixed set", which is also the graceful
      answer whenever AI is unconfigured or unwell */
   const [aiChips, setAiChips] = useState(null);
+  /* Translations we have asked for, keyed by message id, so a re-render never
+     throws away something already paid for. Messages that arrive from the
+     server with a translation attached don't need to be in here — the render
+     falls back to the message's own. `pending` marks the tap in flight.
+     transOff goes true the moment the server tells us translation is not
+     configured, and hides every button at once: one wasted tap, never two. */
+  const [translations, setTranslations] = useState({});
+  const [transOff, setTransOff] = useState(false);
   const chatEnd = useRef(null);
   const [reporting, setReporting] = useState(null);
   /* true for the ~2 seconds of checkmark-and-confetti after a claim lands;
@@ -3430,6 +3438,37 @@ export default function Doorstep() {
         setToast(e.message);
       }
     };
+    /* One tap, one payment, for ever. The server keeps the rendering beside
+       the message, so this call is cheap the second time and free every time
+       after; a null answer means translation isn't configured at all, which
+       takes the affordance away rather than showing an error. */
+    const translateMsg = async (m) => {
+      if (translations[m.id] || m.translation || transOff) return;
+      select();
+      setTranslations((t) => ({ ...t, [m.id]: { pending: true } }));
+      try {
+        const d = await api(`/messages/${m.id}/translate`, { method: "POST", token, body: { lang: "en" } });
+        if (d.translated == null) {
+          setTransOff(true);
+          setTranslations((t) => {
+            const next = { ...t };
+            delete next[m.id];
+            return next;
+          });
+          return;
+        }
+        setTranslations((t) => ({ ...t, [m.id]: { translated: d.translated, sourceLanguage: d.sourceLanguage } }));
+      } catch {
+        /* a chat must never break over a translation — the bubble simply
+           keeps its Translate button and the person can try again */
+        setTranslations((t) => {
+          const next = { ...t };
+          delete next[m.id];
+          return next;
+        });
+      }
+    };
+
     /* AI-written chips fit the actual conversation, so they win when present;
        the fixed set is the ever-reliable fallback for everyone else */
     const QUICK = (aiChips && aiChips.length ? aiChips : thread && thread.role === "collecting"
@@ -3465,13 +3504,29 @@ export default function Doorstep() {
             )}
 
             <div className="chat-scroll">
-              {thread.messages.map((m) =>
-                m.system ? (
-                  <p key={m.id} className="msg-system">{m.body}</p>
-                ) : (
-                  <p key={m.id} className={`msg ${m.mine ? "mine" : ""}${inSameThread && !seenMsgs.ids.has(m.id) ? " landed" : ""}`}>{m.body}</p>
-                )
-              )}
+              {thread.messages.map((m) => {
+                if (m.system) return <p key={m.id} className="msg-system">{m.body}</p>;
+                const cls = `msg ${m.mine ? "mine" : ""}${inSameThread && !seenMsgs.ids.has(m.id) ? " landed" : ""}`;
+                /* only the other person's words are worth translating — my own
+                   are already in the language I typed them in */
+                if (m.mine) return <p key={m.id} className={cls}>{m.body}</p>;
+                const tr = translations[m.id] || m.translation || null;
+                return (
+                  <React.Fragment key={m.id}>
+                    <p className={cls}>{m.body}</p>
+                    {tr && !tr.pending && (
+                      <p className="msg-translation">
+                        {tr.translated}
+                        <i>{tr.sourceLanguage ? `translated from ${tr.sourceLanguage}` : "translated"}</i>
+                      </p>
+                    )}
+                    {!tr && !transOff && (
+                      <button className="msg-translate" onClick={() => translateMsg(m)}>Translate</button>
+                    )}
+                    {tr && tr.pending && <span className="msg-translate is-working">Translating…</span>}
+                  </React.Fragment>
+                );
+              })}
               <span ref={chatEnd} />
             </div>
 

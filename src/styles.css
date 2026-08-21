@@ -4684,6 +4684,62 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
   .ghost-btn:active { transform: none; }
 }
 
+/* ---------- translation ---------- */
+
+/* Hackney speaks a great many languages, and a doorstep handover only works
+   if both people can read the sentence arranging it. The offer sits under
+   the other person's bubble in the app's quietest voice — a plain word, not
+   a button competing with the message it belongs to. */
+.msg-translate {
+  align-self: flex-start;
+  /* the chat column carries an 8px gap; pulling back most of it ties the
+     word to the bubble it belongs to rather than floating between two */
+  margin: -5px 0 0 13px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--body);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--hush);
+  cursor: pointer;
+  transition: color var(--quick) var(--settle);
+}
+.msg-translate:hover { color: var(--railing); }
+.msg-translate.is-working { cursor: default; opacity: 0.7; }
+
+/* The rendering is never mistaken for the neighbour's own words: it is
+   quieter, set in from the bubble's edge, and carries a hairline down its
+   left side — the mark of something the machine produced on their behalf. */
+.msg-translation {
+  align-self: flex-start;
+  max-width: 78%;
+  margin: -4px 0 0 15px;
+  padding: 1px 0 1px 10px;
+  border-left: 2px solid rgba(35, 74, 59, 0.22);
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: rgba(20, 38, 31, 0.72);
+  overflow-wrap: anywhere;
+  animation: translation-unfold var(--move) var(--settle) both;
+}
+.msg-translation i {
+  display: block;
+  margin-top: 3px;
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: var(--hush);
+}
+
+@keyframes translation-unfold {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

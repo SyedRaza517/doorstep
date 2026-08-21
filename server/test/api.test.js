@@ -1667,3 +1667,49 @@ test("wishes fold plurals and the spaces English cannot settle", async () => {
   assert.ok(titles.includes("Highchair, wipes clean"), "highchair answers 'high chair'");
   assert.ok(titles.includes("Moving box, sturdy"), "one box answers a wish for boxes");
 });
+
+test("in-chat translation is participants-only, allowlisted, and degrades to nothing without a key", async () => {
+  const giver = await newNeighbour("Translating Giver");
+  const claimer = await newNeighbour("Translating Claimer");
+  const stranger = await newNeighbour("Translating Stranger");
+
+  const created = await call("/items", {
+    method: "POST",
+    token: giver,
+    body: { title: "Folding drying rack", cat: "Furniture", road: "Test Road, E8", address: "3 Test Road, London E8 3EP", spot: "porch" },
+  });
+  assert.equal(created.status, 201);
+  const claimed = await call(`/items/${created.body.id}/claim`, { method: "POST", token: claimer });
+  assert.equal(claimed.status, 200);
+  const convId = claimed.body.conversationId;
+  assert.ok(convId, "claiming opens the arrangement thread");
+
+  const sent = await call(`/chats/${convId}`, { method: "POST", token: claimer, body: { body: "Dzień dobry, mogę przyjść o piątej?" } });
+  assert.equal(sent.status, 201);
+  const msgId = sent.body.id;
+
+  /* the test environment has no AI key, so asking for a translation must
+     answer with a polite nothing rather than an error — the client hides the
+     affordance on that answer, and a chat must never break over a rendering */
+  const asked = await call(`/messages/${msgId}/translate`, { method: "POST", token: giver, body: { lang: "en" } });
+  assert.equal(asked.status, 200, "an absent credential is a normal state, not a failure");
+  assert.equal(asked.body.translated, null);
+
+  /* the same participant gate as reading the thread: a stranger learns
+     nothing, not even that the message exists */
+  const nosy = await call(`/messages/${msgId}/translate`, { method: "POST", token: stranger, body: { lang: "en" } });
+  assert.equal(nosy.status, 404);
+
+  /* the allowlist is the only way in — nothing arbitrary reaches the model
+     or becomes the key of a cache row */
+  const gibberish = await call(`/messages/${msgId}/translate`, { method: "POST", token: giver, body: { lang: "klingon" } });
+  assert.equal(gibberish.status, 400);
+  assert.equal(gibberish.body.field, "lang");
+
+  /* and the thread carries the translation slot whether or not it is filled */
+  const thread = await call(`/chats/${convId}`, { token: giver });
+  assert.equal(thread.status, 200);
+  const mine = thread.body.messages.find((m) => m.id === msgId);
+  assert.ok(mine, "the message is in the thread");
+  assert.equal(mine.translation, null, "with no key nothing was ever stored");
+});

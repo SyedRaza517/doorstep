@@ -17,7 +17,7 @@ import { geocodePostcode, milesBetween, formatMiles, approxCoords, FALLBACK } fr
 import { lookupPostcode, hasAddressProvider } from "./address.js";
 import { areaFor } from "./geo.js";
 import { rainOutlook, rainWarning } from "./weather.js";
-import { aiConfigured, understand, suggestReplies } from "./ai.js";
+import { aiConfigured, understand, suggestReplies, translate } from "./ai.js";
 import { keywordMatches } from "./matching.js";
 import { specFromPhoto, hasCredentials } from "./autospec.js";
 import { checkListing, hasCredentials as hasModerationCredentials } from "./moderate.js";
@@ -1914,7 +1914,16 @@ app.get(
       [Date.now(), conv.id, req.user.id]
     );
 
-    const msgs = await query("SELECT * FROM messages WHERE conversation_id = $1 ORDER BY id ASC LIMIT 200", [conv.id]);
+    /* Any English rendering already paid for rides along with the message, so
+       a thread reopened tomorrow arrives readable without a second tap and
+       without a second call to the model. */
+    const msgs = await query(
+      `SELECT m.*, t.body AS translated_body, t.source_lang
+         FROM messages m
+         LEFT JOIN message_translations t ON t.message_id = m.id AND t.lang = 'en'
+        WHERE m.conversation_id = $1 ORDER BY m.id ASC LIMIT 200`,
+      [conv.id]
+    );
     const giving = num(conv.giver_id) === req.user.id;
     const other = await one("SELECT name FROM users WHERE id = $1", [giving ? conv.claimer_id : conv.giver_id]);
     const item = castItem(await one("SELECT * FROM items WHERE id = $1", [conv.item_id]));
@@ -1934,6 +1943,7 @@ app.get(
         system: m.sender_id == null,
         body: m.body,
         createdAt: num(m.created_at),
+        translation: m.translated_body ? { translated: m.translated_body, sourceLanguage: m.source_lang || null } : null,
       })),
     });
   })
@@ -2003,6 +2013,79 @@ app.post(
     );
     await pushMessage(conv.id, req.user.id, body, now);
     res.status(201).json({ id: num(row.id), body, createdAt: now });
+  })
+);
+
+/* ---- translation ----
+   Hackney is one of the most multilingual boroughs in Britain. A giveaway
+   only widens who can give and collect if both people can read the sentence
+   arranging the handover, so any message the other person sent can be turned
+   into a language you have, once, with one tap.
+
+   The list below is the languages most spoken in Hackney households after
+   English, plus English itself as the usual target. It is deliberately short
+   — an allowlist rather than a free-text field, so nothing arbitrary is ever
+   fed to the model or written into the key of a cache row — and adding a
+   language is one line here. */
+const TRANSLATE_LANGS = {
+  en: "English",
+  pl: "Polish",
+  tr: "Turkish",
+  es: "Spanish",
+  fr: "French",
+  ro: "Romanian",
+  bn: "Bengali",
+  ur: "Urdu",
+  ar: "Arabic",
+  pt: "Portuguese",
+  it: "Italian",
+  so: "Somali",
+};
+
+app.post(
+  "/api/messages/:id/translate",
+  auth,
+  wrap(async (req, res) => {
+    const lang = String((req.body || {}).lang || "en").toLowerCase().trim();
+    const targetLanguage = TRANSLATE_LANGS[lang];
+    if (!targetLanguage) return fail(res, 400, "That language isn't supported yet", "lang");
+
+    const msgId = Number(req.params.id);
+    if (!Number.isFinite(msgId) || msgId <= 0) return fail(res, 404, "No such message");
+
+    const msg = await one("SELECT * FROM messages WHERE id = $1", [msgId]);
+    if (!msg) return fail(res, 404, "No such message");
+
+    /* the same participant gate as reading the thread: a stranger cannot
+       translate their way into a conversation they were never part of, and
+       learns nothing — not even that the message exists */
+    const conv = await one("SELECT * FROM conversations WHERE id = $1", [msg.conversation_id]);
+    if (!conv || (num(conv.giver_id) !== req.user.id && num(conv.claimer_id) !== req.user.id))
+      return fail(res, 404, "No such message");
+
+    /* paid for once, read many times — a stored rendering never touches the
+       model again, however often the thread is scrolled or reopened */
+    const stored = await one("SELECT * FROM message_translations WHERE message_id = $1 AND lang = $2", [msgId, lang]);
+    if (stored) return res.json({ translated: stored.body, sourceLanguage: stored.source_lang || null, cached: true });
+
+    /* an absent credential is a normal state of the world, not a failure:
+       the answer is a polite nothing, and the client hides the button rather
+       than offering a tap that can never work */
+    if (!aiConfigured) return res.json({ translated: null });
+
+    try {
+      const out = await translate(msg.body, targetLanguage);
+      if (!out || !out.translated) return res.json({ translated: null });
+      await query(
+        "INSERT INTO message_translations (message_id, lang, body, source_lang, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (message_id, lang) DO NOTHING",
+        [msgId, lang, out.translated, out.sourceLanguage || null, Date.now()]
+      );
+      res.json({ translated: out.translated, sourceLanguage: out.sourceLanguage || null, cached: false });
+    } catch {
+      /* a chat must never break over a translation. Any hiccup degrades to
+         the same quiet null the missing-credential path returns. */
+      res.json({ translated: null });
+    }
   })
 );
 

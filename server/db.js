@@ -280,6 +280,22 @@ CREATE TABLE IF NOT EXISTS messages (
   read_at         BIGINT
 );
 
+/* A translation is paid for once and read many times. The same sentence is
+   re-read every time the thread is scrolled, and the same thread reopened
+   tomorrow morning should cost nothing at all — so the rendering is stored
+   beside the message rather than asked for again. Keyed by message and
+   language, because one message may be read in two different languages by
+   two different people. The rows die with their message: ON DELETE CASCADE
+   means an erasure request needs no extra sweep here. */
+CREATE TABLE IF NOT EXISTS message_translations (
+  message_id  BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  lang        TEXT NOT NULL,
+  body        TEXT NOT NULL,
+  source_lang TEXT,
+  created_at  BIGINT NOT NULL,
+  PRIMARY KEY (message_id, lang)
+);
+
 /* Both sides rate a handover once it has happened — stars unlock only after
    collection, one rating per person per item, exactly Olio's gate. */
 CREATE TABLE IF NOT EXISTS ratings (
