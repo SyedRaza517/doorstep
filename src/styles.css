@@ -4774,3 +4774,244 @@ input.range:focus-visible { outline: 2px solid var(--railing); outline-offset: 4
 }
 .tabbar-btn svg { width: 20px; height: 20px; }
 .tabbar-icon em { font-size: 9px; min-width: 15px; height: 15px; }
+
+/* ---------- street pages ---------- */
+
+/* Everything below moves with transform and opacity only, on the shared
+   motion tokens, so the global prefers-reduced-motion block earlier in
+   this file switches all of it off with its !important durations — no
+   rule here needs its own reduced-motion escape hatch. */
+
+/* the row that gets you there wears slate: the colour of a kerb, sitting
+   quietly between the green of your things and the rose of a wish */
+.link-ic.slate { background: rgba(35, 74, 59, 0.09); color: #46605A; }
+
+/* The hero is the whole argument in one card: a real road name, in bottle
+   green, at a size normally reserved for the app's own name. Nothing else
+   in the app claims a place this confidently, because nothing else in the
+   app can — it takes a verified address to know which road is yours. */
+.street-hero {
+  margin: -6px 0 18px;
+  padding: 22px 18px 18px;
+  border-radius: 20px;
+  background: linear-gradient(178deg, #2A5747 0%, var(--railing) 88%);
+  color: #F7F5EC;
+  text-align: center;
+  box-shadow: 0 6px 20px rgba(20, 38, 31, 0.16);
+}
+
+.street-eyebrow {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(247, 245, 236, 0.55);
+  margin-bottom: 8px;
+}
+
+.street-name {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 27px;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: #F7F5EC;
+  margin: 0 0 5px;
+  /* a long road name shrinks the gap rather than breaking the card */
+  overflow-wrap: anywhere;
+}
+
+.street-area {
+  font-size: 13.5px;
+  color: rgba(247, 245, 236, 0.66);
+  margin: 0;
+}
+
+/* the tiles are the profile hero's, borrowed wholesale — one visual idea
+   for "here are three numbers about you", used in both places */
+.street-hero .stats-row { margin: 18px 0 0; }
+.street-hero .stat-tile {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.street-hero .stat-tile b { color: var(--signal); }
+.street-hero .stat-tile span { color: rgba(247, 245, 236, 0.66); }
+
+/* the invitation that stands in for the numbers when the road is too small
+   to have any that can be shown without pointing at one household */
+.street-invite {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.street-invite p {
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: rgba(247, 245, 236, 0.86);
+  margin: 0 0 14px;
+}
+
+.street-share {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--body);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--signal);
+  border: none;
+  border-radius: 999px;
+  padding: 11px 20px;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(20, 38, 31, 0.2);
+  transition: transform var(--quick) var(--spring), box-shadow var(--quick) var(--settle);
+}
+.street-share:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(20, 38, 31, 0.24); }
+.street-share:active { transform: scale(0.97); }
+
+/* the same button, but as a full-width invitation under a street that
+   already has a page and now wants more of its road on it */
+.street-share.wide {
+  display: flex;
+  width: 100%;
+  margin: 0 0 20px;
+  background: var(--card);
+  color: var(--railing);
+  border: 1.5px solid var(--rule);
+  box-shadow: none;
+}
+.street-share.wide:hover { border-color: rgba(35, 74, 59, 0.4); box-shadow: 0 4px 12px rgba(20, 38, 31, 0.1); }
+
+/* ---- the borough leaderboard ---- */
+
+.street-board { margin-top: 4px; }
+
+.street-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  transition: transform var(--quick) var(--settle), border-color var(--quick) var(--settle);
+}
+.street-row:hover { transform: translateY(-1px); border-color: rgba(35, 74, 59, 0.32); }
+
+/* your own road, found at a glance: the signal yellow says "that one is
+   yours" faster than any label placed beside it could */
+.street-row.mine {
+  border-color: var(--signal);
+  border-left: 4px solid var(--signal);
+  background: rgba(245, 197, 24, 0.09);
+}
+
+.street-rank {
+  flex: none;
+  width: 22px;
+  font-family: var(--meter);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--hush);
+  font-variant-numeric: tabular-nums;
+}
+
+.street-row-copy { flex: 1; min-width: 0; }
+.street-row-copy b {
+  display: block;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.street-row-copy small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--hush);
+  margin-top: 2px;
+}
+
+.street-count { flex: none; text-align: right; }
+.street-count b {
+  display: block;
+  font-family: var(--meter);
+  font-weight: 500;
+  font-size: 18px;
+  color: var(--railing);
+  font-variant-numeric: tabular-nums;
+}
+.street-count small {
+  display: block;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--hush);
+}
+
+.street-foot {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--hush);
+  margin: 10px 2px 0;
+}
+
+/* ---- the one line on the home feed ---- */
+
+/* Deliberately the slimmest card in the app. It is a door, not a
+   destination: enough to say the road is doing something, never enough to
+   compete with the things actually going free below it. */
+.street-strip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-left: 4px solid var(--railing);
+  border-radius: 14px;
+  padding: 10px 12px;
+  margin: 0 0 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: transform var(--quick) var(--settle), border-color var(--quick) var(--settle);
+}
+.street-strip:hover { transform: translateY(-1px); border-color: rgba(35, 74, 59, 0.32); }
+.street-strip:active { transform: scale(0.995); }
+
+.street-strip-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: rgba(35, 74, 59, 0.1);
+  color: var(--railing);
+}
+
+.street-strip b {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.street-strip small {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--hush);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.street-strip-go { flex: none; font-size: 17px; color: rgba(35, 74, 59, 0.35); }

@@ -15,13 +15,13 @@ import {
 } from "./db.js";
 import { geocodePostcode, milesBetween, formatMiles, approxCoords, FALLBACK } from "./geo.js";
 import { lookupPostcode, hasAddressProvider } from "./address.js";
-import { areaFor } from "./geo.js";
+import { areaFor, streetKey, streetName } from "./geo.js";
 import { rainOutlook, rainWarning } from "./weather.js";
 import { aiConfigured, understand, suggestReplies, translate } from "./ai.js";
 import { keywordMatches } from "./matching.js";
 import { specFromPhoto, hasCredentials } from "./autospec.js";
 import { checkListing, hasCredentials as hasModerationCredentials } from "./moderate.js";
-import { impactFor } from "./impact.js";
+import { impactFor, kgForCat } from "./impact.js";
 
 const PORT = process.env.PORT || 4000;
 const CLAIM_HOLD_MS = 30 * 60 * 1000;
@@ -1756,6 +1756,205 @@ app.get(
       .sort((a, b) => b.count - a.count)
       .slice(0, 12);
     res.json({ wants });
+  })
+);
+
+/* ---- street pages ----
+   The growth loop nobody else can run. Nextdoor, Olio and Freegle all group
+   people by a drawn radius or a self-chosen group, because none of them
+   verify an address. Doorstep does, so it can say something none of them
+   can: this road, these neighbours, this many things rehomed. A street is
+   something people already feel they belong to, and a page about it is
+   worth sending to the WhatsApp group.
+
+   Everything below is computed on read. There is no streets table and
+   nothing is written, because a page derived on read can never drift from
+   the truth: no counter to increment and forget, no nightly job to re-run,
+   nothing to backfill when an item is collected late, a listing is hidden,
+   or a neighbour moves away. The numbers are simply what the database says
+   at the moment somebody looks.
+
+   The grouping happens in JS rather than SQL. Normalising a road is a
+   handful of rules — strip the district, drop the punctuation — and they
+   already live in one place, streetKey() in geo.js. Expressing them a
+   second time as a Postgres regex would mean two definitions of "the same
+   street" that could disagree, and that disagreement is exactly the bug
+   that splits one road into two half-empty pages. At launch scale the whole
+   user table is a few hundred rows, so pulling them and reducing in JS
+   costs nothing and keeps one source of truth. */
+
+/* the calendar month the app is currently living in */
+const startOfThisMonth = () => {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+};
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/* Consecutive weeks, counting back from the one we are in, that saw at
+   least one thing collected on the street. A streak is the honest kind of
+   pressure: it only ever says how long the road has been going, never that
+   anyone has let it slip. Capped at a year so a long-lived street can't
+   turn this into a long loop. */
+function weeksRunning(times, now) {
+  if (!times.length) return 0;
+  const weeks = new Set(times.map((t) => Math.floor((now - t) / WEEK_MS)));
+  let streak = 0;
+  while (streak < 52 && weeks.has(streak)) streak++;
+  return streak;
+}
+
+/* "E8 3PA" and "E83PA" are both district E8 — the unit a borough thinks in */
+function postcodeDistrict(postcode) {
+  const clean = String(postcode || "").trim().toUpperCase().replace(/\s+/g, "");
+  const m = clean.match(/^([A-Z]{1,2}\d[A-Z\d]?)(?:\d[A-Z]{2})?$/);
+  return m ? m[1] : null;
+}
+
+/* Three verified households. Below that, a "street page" is a page about
+   one person: their road, roughly their address, how often they are home to
+   hand things over. That is a surveillance product, not a neighbourhood
+   one, so the floor is a hard rule rather than a setting anyone can lower.
+   Three is also the smallest number that reads as a group rather than a
+   pair. */
+const STREET_FLOOR = 3;
+
+/* Every street the database knows about, keyed by streetKey. */
+async function readStreets() {
+  const now = Date.now();
+  const monthStart = startOfThisMonth();
+  const people = await query("SELECT id, road, postcode FROM users WHERE road IS NOT NULL AND road <> ''");
+  /* hidden listings still count here: the thing genuinely left the house */
+  const collected = await query("SELECT road, cat, collected_at, claimed_by FROM items WHERE collected_at IS NOT NULL");
+
+  const streets = new Map();
+  const get = (key) => {
+    if (!streets.has(key))
+      streets.set(key, {
+        key,
+        name: "",
+        area: null,
+        district: null,
+        people: new Set(),
+        rehomed: 0,
+        kg: 0,
+        givenThisMonth: 0,
+        collectedThisMonth: 0,
+        times: [],
+      });
+    return streets.get(key);
+  };
+
+  /* who lives where, so a collection can be credited to the collector's own
+     road as well as to the giver's */
+  const homeOf = new Map();
+  for (const u of people) {
+    const key = streetKey(u.road);
+    if (!key) continue;
+    const s = get(key);
+    s.people.add(num(u.id));
+    homeOf.set(num(u.id), key);
+    if (!s.name) s.name = streetName(u.road);
+    if (!s.area) s.area = areaFor(u.postcode);
+    if (!s.district) s.district = postcodeDistrict(u.postcode);
+  }
+
+  for (const it of collected) {
+    const at = num(it.collected_at);
+    const key = streetKey(it.road);
+    if (key) {
+      const s = get(key);
+      /* the road gave this away, whoever ended up carrying it off */
+      s.rehomed += 1;
+      s.kg += kgForCat(it.cat);
+      s.times.push(at);
+      if (at >= monthStart) s.givenThisMonth += 1;
+      if (!s.name) s.name = streetName(it.road);
+    }
+    /* and what the road carried home, which is the other half of being a
+       neighbourhood: a street that only ever gives is a charity shop */
+    const takerKey = it.claimed_by != null ? homeOf.get(num(it.claimed_by)) : null;
+    if (takerKey && at >= monthStart) get(takerKey).collectedThisMonth += 1;
+  }
+
+  for (const s of streets.values()) {
+    s.neighbours = s.people.size;
+    s.streak = weeksRunning(s.times, now);
+    /* kilos are an estimate by construction — the published average weight
+       for the category, borrowed from impact.js so the street page and the
+       council report can never quote two different numbers */
+    s.kg = Math.round(s.kg);
+  }
+  return streets;
+}
+
+const publicStreet = (s) => ({
+  name: s.name,
+  area: s.area,
+  neighbours: s.neighbours,
+  rehomed: s.rehomed,
+  givenThisMonth: s.givenThisMonth,
+  collectedThisMonth: s.collectedThisMonth,
+  streak: s.streak,
+  kg: s.kg,
+});
+
+/* Your own road — or an honest account of why it hasn't got a page yet.
+   The below-the-floor answer still carries the road's name, because the
+   invitation state on the client needs to say which street is waiting. */
+app.get(
+  "/api/streets/mine",
+  auth,
+  wrap(async (req, res) => {
+    const key = streetKey(req.user.road);
+    if (!key) return res.json({ street: null, name: null, area: null, neighbours: 0, floor: STREET_FLOOR });
+
+    const streets = await readStreets();
+    const s = streets.get(key);
+    const name = (s && s.name) || streetName(req.user.road);
+    const area = (s && s.area) || areaFor(req.user.postcode);
+    const neighbours = s ? s.neighbours : 0;
+    if (neighbours < STREET_FLOOR) return res.json({ street: null, name, area, neighbours, floor: STREET_FLOOR });
+
+    res.json({ street: publicStreet(s), name, area, neighbours, floor: STREET_FLOOR });
+  })
+);
+
+/* The borough leaderboard: the streets around you, best month first. Eight
+   at most, and never a bottom of the table — a league that shames the quiet
+   roads would make listing feel like being marked, and the quiet road is
+   precisely the one we want to draw in. */
+app.get(
+  "/api/streets/top",
+  maybeAuth,
+  wrap(async (req, res) => {
+    const postcode = req.guest ? "" : req.user.postcode;
+    /* a viewer with no postcode has no "around here" to show, and someone
+       browsing from anywhere is better told nothing than told about a
+       street that isn't theirs */
+    if (!postcode) return res.json({ streets: [] });
+
+    const district = postcodeDistrict(postcode);
+    const area = areaFor(postcode);
+    const mine = req.guest ? "" : streetKey(req.user.road);
+
+    const streets = await readStreets();
+    const nearby = [...streets.values()]
+      .filter((s) => s.neighbours >= STREET_FLOOR && s.name)
+      .filter((s) => (area && s.area === area) || (district && s.district === district))
+      .sort((a, b) => b.givenThisMonth - a.givenThisMonth || b.rehomed - a.rehomed || a.name.localeCompare(b.name))
+      .slice(0, 8)
+      .map((s) => ({
+        name: s.name,
+        area: s.area,
+        neighbours: s.neighbours,
+        /* "rehomed" on a leaderboard means this month — a league table of
+           all-time totals only ever rewards the street that joined first */
+        rehomed: s.givenThisMonth,
+        streak: s.streak,
+        mine: Boolean(mine) && s.key === mine,
+      }));
+    res.json({ streets: nearby });
   })
 );
 

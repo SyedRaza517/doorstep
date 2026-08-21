@@ -1713,3 +1713,75 @@ test("in-chat translation is participants-only, allowlisted, and degrades to not
   assert.ok(mine, "the message is in the thread");
   assert.equal(mine.translation, null, "with no key nothing was ever stored");
 });
+
+/* Street pages are the one thing a competitor can't copy without verifying
+   addresses, so the two rules that make them safe are worth pinning down:
+   three households before a page exists at all, and every number computed
+   live from the items table rather than a counter that could drift.
+
+   The road name is deliberately nothing like the "Test Road, E8" the rest
+   of this file uses, because these assertions are about exact neighbour
+   counts and any stray account on the same road would break them. The three
+   spellings are also deliberate: they prove the normaliser folds a district
+   suffix and a full postcode into one street rather than three. */
+test("a street with three households gets a page; one household alone does not", async () => {
+  const stamp = `${Date.now()}${Math.round(performance.now())}`;
+  const joinStreet = async (name, road) =>
+    (
+      await call("/auth/signup", {
+        method: "POST",
+        body: {
+          name,
+          email: `${name.toLowerCase().replace(/[^a-z]/g, "")}${stamp}@test.uk`,
+          postcode: "E8 3EP",
+          password: "password99",
+          acceptPrivacy: true,
+          road,
+          address: `${name.length} ${road}`,
+        },
+      })
+    ).body.token;
+
+  const one = await joinStreet("Marmalade One", "Marmalade Terrace, E8");
+  const two = await joinStreet("Marmalade Two", "marmalade terrace");
+  const three = await joinStreet("Marmalade Three", "Marmalade Terrace, E8 3EP");
+  assert.ok(one && two && three, "three neighbours signed up on the same road");
+
+  const page = await call("/streets/mine", { token: one });
+  assert.equal(page.status, 200);
+  assert.ok(page.body.street, "three households is enough for a page");
+  assert.equal(page.body.street.name, "Marmalade Terrace", "the district is not part of the name");
+  assert.ok(page.body.street.neighbours >= 3, "all three spellings count as one street");
+
+  /* the privacy floor: a page about a street with one household on it is a
+     page about one person, so it must not exist at all */
+  const alone = await joinStreet("Piccalilli Solo", "Piccalilli Walk, E8");
+  const empty = await call("/streets/mine", { token: alone });
+  assert.equal(empty.status, 200);
+  assert.equal(empty.body.street, null, "one household gets no page");
+  assert.equal(empty.body.neighbours, 1);
+  assert.equal(empty.body.name, "Piccalilli Walk", "but the road is named, so it can be invited");
+
+  /* and the counts are read from the items table, not incremented anywhere */
+  const before = page.body.street.rehomed;
+  const listed = await call("/items", {
+    method: "POST",
+    token: one,
+    body: { title: "Marmalade shelf", cat: "Furniture", road: "Marmalade Terrace, E8", address: "3 Marmalade Terrace, London E8 3EP" },
+  });
+  assert.equal(listed.status, 201);
+  await call(`/items/${listed.body.id}/claim`, { method: "POST", token: two });
+  assert.equal((await call(`/items/${listed.body.id}/collected`, { method: "POST", token: two })).status, 200);
+
+  const after = await call("/streets/mine", { token: three });
+  assert.equal(after.body.street.rehomed, before + 1, "a collected thing shows up on the street");
+  assert.ok(after.body.street.streak >= 1, "something went this week, so the street is running");
+
+  /* and the road appears on the borough board, flagged as the viewer's own */
+  const board = await call("/streets/top", { token: one });
+  assert.equal(board.status, 200);
+  const ours = board.body.streets.find((s) => s.name === "Marmalade Terrace");
+  assert.ok(ours, "a street doing well this month is listed");
+  assert.equal(ours.mine, true, "the viewer's own road is marked so it can be highlighted");
+  assert.ok(board.body.streets.every((s) => s.neighbours >= 3), "the board never names a street below the floor");
+});

@@ -99,3 +99,49 @@ export function areaFor(postcode) {
   const stem = outward.replace(/[A-Z]$/, "");
   return AREA_BY_DISTRICT[stem] || null;
 }
+
+/* ---------------- streets ----------------
+
+   A road arrives spelled several ways. The address lookup hands back
+   "Ellingfort Road, E8"; someone who typed their own address into the
+   profile writes "ellingfort road"; a seeded listing carries the full
+   "Ellingfort Road, E8 3PA". They are the same doorsteps, and unless all
+   three collapse to one key a street page silently splits into three
+   half-empty ones — the exact failure that would make the feature look
+   like a lie to the people living on it. */
+
+/* the trailing postcode district, with or without the comma and with or
+   without the inward half: ", E8", " E8", ", E8 3PA" */
+const DISTRICT_TAIL = /[,\s]+[A-Z]{1,2}\d[A-Z\d]?(?:\s*\d[A-Z]{2})?\s*$/i;
+
+/* a postcode standing alone, which is a place but not a street name */
+const BARE_DISTRICT = /^[A-Z]{1,2}\d[A-Z\d]?(?:\s*\d[A-Z]{2})?$/i;
+
+function withoutDistrict(road) {
+  const raw = String(road || "").trim();
+  /* "E8" on its own is a district, not a road — nobody lives on it, so it
+     never earns a page */
+  if (!raw || BARE_DISTRICT.test(raw)) return "";
+  return raw.replace(DISTRICT_TAIL, "").trim();
+}
+
+/* The identity of a street: lowercase, no district, no punctuation, single
+   spaces. Never shown to anyone — it exists only so two spellings meet. */
+export function streetKey(road) {
+  return withoutDistrict(road)
+    .toLowerCase()
+    /* possessives close up rather than split: "Mark's" is one word */
+    .replace(/['\u2019]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/* The name a neighbour would recognise on a sign: the road without its
+   district, title-cased so "ellingfort road" reads as somewhere real. */
+export function streetName(road) {
+  return withoutDistrict(road)
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[A-Za-z0-9'\u2019]+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+}

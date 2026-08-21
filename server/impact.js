@@ -41,6 +41,12 @@ const CO2E_PER_KG = 0.51;
 const DISPOSAL_COST_PER_TONNE = 160.15;
 const RECYCLING_CREDIT_PER_TONNE = 71.16;
 
+/* The same published weights, lent out. Anywhere else in the app that wants
+   to say "that is roughly this many kilos" must borrow this rather than
+   invent an average of its own — two different numbers for the same pile of
+   furniture is how a diversion report stops being citable. */
+export const kgForCat = (cat) => KG_PER_ITEM[cat] || DEFAULT_KG;
+
 export const IMPACT_CAVEAT =
   "Weights: MRWA/Furniture Re-use Network approved averages. CO2: Freegle's published 0.51 tCO2e per tonne reused (WRAP Benefits of Reuse tool). Disposal: WRAP Gate Fees 2025-26, landfill £34/t plus £126.15/t landfill tax.";
 

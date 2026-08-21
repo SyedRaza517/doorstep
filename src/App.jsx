@@ -776,6 +776,11 @@ export default function Doorstep() {
   const [hands, setHands] = useState([]);
   const [sky, setSky] = useState(null);
   const [wants, setWants] = useState([]);
+  /* the street page: your own road, and the roads around it. Both are
+     computed fresh on the server every time, so nothing here is cached
+     beyond the screen that is looking at it. */
+  const [street, setStreet] = useState(null);
+  const [topStreets, setTopStreets] = useState([]);
   const [draft, setDraft] = useState("");
   /* situational quick-reply chips written by the server's AI for the open
      thread; null means "use the fixed set", which is also the graceful
@@ -1045,6 +1050,7 @@ export default function Doorstep() {
         chats: "profile",
         mine: "profile",
         radar: "profile",
+        street: "profile",
       };
       if (upFrom[here]) {
         if (here === "chat") {
@@ -1096,6 +1102,10 @@ export default function Doorstep() {
     }
     if (screen === "impact") api("/impact", { token }).then(setImpact).catch(() => {});
     if (screen === "radar") api("/demand", { token }).then((d) => setWants(d.wants)).catch(() => {});
+    /* the home feed carries a one-line version of the street page, so its
+       numbers are fetched there too rather than only on the street screen */
+    if (screen === "street" || screen === "home") api("/streets/mine", { token }).then(setStreet).catch(() => {});
+    if (screen === "street") api("/streets/top", { token }).then((d) => setTopStreets(d.streets)).catch(() => setTopStreets([]));
     if (screen === "chats") api("/chats", { token }).then((d) => { setChats(d.chats); setChatUnread(d.unread); }).catch(() => {});
     if (screen === "detail" && detailId) {
       const it = items.find((x) => x.id === detailId);
@@ -1151,7 +1161,7 @@ export default function Doorstep() {
   }, [screen, token, tab, chatId]);
 
   /* the feed refreshes for guests too */
-  const browsing = ["home", "map", "detail", "give", "profile", "notifications", "wishes", "impact", "fallback", "mine", "chats", "chat", "radar"].includes(screen);
+  const browsing = ["home", "map", "detail", "give", "profile", "notifications", "wishes", "impact", "fallback", "mine", "chats", "chat", "radar", "street"].includes(screen);
   useEffect(() => {
     if (!browsing) return;
     /* a map with only the first page of pins would look half empty */
@@ -3724,6 +3734,152 @@ export default function Doorstep() {
     );
   }
 
+  /* ---------------- your street ----------------
+     Every other free-stuff app groups people by a radius they drew or a
+     group they joined. Doorstep verifies addresses, so it can group people
+     by the one boundary they already believe in: their road. */
+
+  if (screen === "street") {
+    const page = street && street.street;
+    const name = (street && street.name) || "Your street";
+    const area = street && street.area;
+    const floor = (street && street.floor) || 3;
+    const short = street ? Math.max(0, floor - (street.neighbours || 0)) : floor;
+
+    /* Sharing is the loop, not a nicety. A street page only exists once
+       three verified households are on the road, so the person looking at
+       an empty one is the only person who can fill it — and the message
+       they send lands in a WhatsApp group of people who all live within a
+       hundred metres of each other and can all verify their address. No
+       paid channel we could buy reaches that audience that precisely. */
+    const shareLine = page
+      ? `${name} is on Doorstep — ${page.neighbours} neighbours here and ${page.rehomed} things rehomed so far. Join the road: ${window.location.origin}`
+      : `I've joined Doorstep for ${name} — good things left on doorsteps for neighbours instead of going to the tip. The road needs ${short === 1 ? "one more household" : `${short} more households`} before it gets its own page: ${window.location.origin}`;
+
+    const shareStreet = async () => {
+      try {
+        if (navigator.share) {
+          await navigator.share({ title: `${name} on Doorstep`, text: shareLine });
+          return;
+        }
+        await navigator.clipboard.writeText(shareLine);
+        setToast("Copied — paste it to your neighbours.");
+      } catch {
+        /* a cancelled share sheet is not a failure, and a browser that
+           refuses the clipboard shouldn't leave the tap feeling broken */
+        try {
+          await navigator.clipboard.writeText(shareLine);
+          setToast("Copied — paste it to your neighbours.");
+        } catch {
+          setToast("Tell them in person, then — it works just as well.");
+        }
+      }
+    };
+
+    return (
+      <SubScreen title="Your street" time={timeNow} toast={toast} onBack={() => setScreen("profile")}>
+        {street && !street.name && (
+          <div className="wish-empty">
+            <img src={`${API}/photos/houseplant`} alt="" />
+            <b>We don't know your road yet</b>
+            <span>Add your address in your profile and your street gets a page of its own.</span>
+          </div>
+        )}
+
+        {street && street.name && (
+          <div className="street-hero">
+            <span className="street-eyebrow">Your street</span>
+            <h2 className="street-name">{name}</h2>
+            <p className="street-area">{area || "Your neighbourhood"}</p>
+
+            {page ? (
+              <div className="stats-row">
+                <div className="stat-tile">
+                  <b>{page.neighbours}</b>
+                  <span>Neighbours</span>
+                </div>
+                <div className="stat-tile">
+                  <b>{page.rehomed}</b>
+                  <span>Rehomed</span>
+                </div>
+                <div className="stat-tile">
+                  <b>{page.streak}</b>
+                  <span>{page.streak === 1 ? "Week running" : "Weeks running"}</span>
+                </div>
+              </div>
+            ) : (
+              /* Below the floor the page shows no numbers at all — not even
+                 greyed-out ones. A street with one household on it is a page
+                 about one person, and no amount of styling makes that all
+                 right. So: an invitation instead. */
+              <div className="street-invite">
+                <p>
+                  {name} needs {floor === 3 ? "three" : floor} doorsteps before it gets a page —
+                  invite a neighbour.
+                </p>
+                <button className="street-share" onClick={shareStreet}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
+                    <path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4" />
+                  </svg>
+                  Invite the road
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {page && (
+          <>
+            <p className="sub-lede">
+              {page.givenThisMonth === 0
+                ? "Nothing has gone from the road yet this month — someone has to go first, and it may as well be you."
+                : `${page.givenThisMonth} ${page.givenThisMonth === 1 ? "thing has" : "things have"} left the road this month, and ${page.collectedThisMonth} ${page.collectedThisMonth === 1 ? "has" : "have"} come home to it. That is roughly ${page.kg} kg kept out of a skip.`}
+            </p>
+            <button className="street-share wide" onClick={shareStreet}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
+                <path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4" />
+              </svg>
+              Share {name}
+            </button>
+          </>
+        )}
+
+        {topStreets.length > 0 && (
+          <div className="street-board">
+            <p className="sub-head">Streets nearby this month</p>
+            {topStreets.map((t, i) => (
+              <div key={t.name + i} className={`street-row ${t.mine ? "mine" : ""}`}>
+                <span className="street-rank" aria-hidden="true">{i + 1}</span>
+                <span className="street-row-copy">
+                  <b>{t.name}</b>
+                  <small>
+                    {[
+                      t.area,
+                      `${t.neighbours} ${t.neighbours === 1 ? "neighbour" : "neighbours"}`,
+                      t.streak > 0 ? `${t.streak} ${t.streak === 1 ? "week" : "weeks"} running` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </small>
+                </span>
+                <span className="street-count">
+                  <b>{t.rehomed}</b>
+                  <small>rehomed</small>
+                </span>
+              </div>
+            ))}
+            {/* Only the streets doing well are named. There is no bottom of
+                this table, because a road that sees itself last would stop
+                looking, and it is the quiet road we most want here. */}
+            <p className="street-foot">Only the roads having a good month are listed — nobody comes last here.</p>
+          </div>
+        )}
+      </SubScreen>
+    );
+  }
+
   /* ---------------- impact ---------------- */
 
   if (screen === "impact") {
@@ -3953,6 +4109,16 @@ export default function Doorstep() {
                   <span className="link-copy">
                     Your things
                     <span>To collect, collected, given, and your wish list</span>
+                  </span>
+                  <span className="link-go" aria-hidden="true">›</span>
+                </button>
+                <button onClick={() => setScreen("street")}>
+                  <span className="link-ic slate" aria-hidden="true">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21h18" /><path d="M5 21V9.5L10 6v15" /><path d="M14 21V4l5 3.5V21" /><path d="M7.4 12h.01M7.4 15.5h.01M16.4 11h.01M16.4 14.5h.01" /></svg>
+                  </span>
+                  <span className="link-copy">
+                    Your street
+                    <span>How your road is doing</span>
                   </span>
                   <span className="link-go" aria-hidden="true">›</span>
                 </button>
@@ -4997,6 +5163,32 @@ export default function Doorstep() {
                   </button>
                 )}
               </div>
+            )}
+
+            {!q.trim() && (
+              <button className="map-peek" onClick={() => setScreen("map")} aria-label="Open the map">
+                <div className="map-peek-canvas" ref={miniMapRef} aria-hidden="true" />
+                <span className="map-peek-chip">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0z" /><circle cx="12" cy="10" r="3" /></svg>
+                  {items.filter((i) => i.lat != null).length} pinned around you
+                </span>
+                <span className="map-peek-open">Open the map ›</span>
+              </button>
+            )}
+
+            {/* One line, and only once the road has three verified households
+                on it. The point is not the number — it is that the number is
+                about somewhere you live, which is what makes it worth a tap
+                and, eventually, worth sending to a neighbour. */}
+            {street && street.street && !q.trim() && (
+              <button className="street-strip" onClick={() => setScreen("street")}>
+                <span className="street-strip-ic" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21h18" /><path d="M5 21V9.5L10 6v15" /><path d="M14 21V4l5 3.5V21" /></svg>
+                </span>
+                <b>{street.street.name}</b>
+                <small>{street.street.rehomed} things rehomed</small>
+                <span className="street-strip-go" aria-hidden="true">›</span>
+              </button>
             )}
 
             {recent.length > 0 && !q.trim() && (
