@@ -3342,7 +3342,8 @@ app.use((err, req, res, next) => {
    where it is obviously a demo — a local PGlite database — and refuses to
    touch a real Postgres unless someone deliberately asks for it in writing
    with SEED_DEMO=1. */
-const seedingWanted = process.env.SEED_DEMO === "1" || !process.env.DATABASE_URL;
+const seedingWanted =
+  process.env.SEED_DEMO === "0" ? false : process.env.SEED_DEMO === "1" || !process.env.DATABASE_URL;
 
 const start = async () => {
   await initDb();

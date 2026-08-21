@@ -2302,6 +2302,17 @@ export default function Doorstep() {
   /* the headline counts what is actually on screen, filters and all —
      saying "13 things" above five cards is just wrong */
   const liveCount = feed.total || visible.length;
+  /* Nothing here, nothing further out, and nothing being filtered away: the
+     neighbourhood has not gone quiet, it has not started yet. */
+  const opening =
+    !feed.loading &&
+    visible.length === 0 &&
+    feed.elsewhere === 0 &&
+    !q.trim() &&
+    !savedOnly &&
+    !asksOnly &&
+    typeFilter === "all" &&
+    filter === "Going soonest";
 
   /* Sheets belong to no single screen: they are opened from the feed, the
      detail screen and Your things, so they render alongside every one of
@@ -5525,16 +5536,57 @@ export default function Doorstep() {
                   <path d="M9 8V6a3 3 0 0 1 6 0v2" />
                 </svg>
                 <b>
-                  {feed.elsewhere > 0
-                    ? `Nothing within ${radius === 0.5 ? "half a mile" : `${radius} miles`} of you`
-                    : q.trim()
-                      ? `Nothing matching "${q.trim()}" just now`
-                      : savedOnly
-                        ? "Nothing saved yet"
-                        : typeFilter === "food"
-                          ? "No food going right now"
-                          : "Nothing here right now"}
+                  {opening
+                    ? "Doorstep is opening on your street"
+                    : feed.elsewhere > 0
+                      ? `Nothing within ${radius === 0.5 ? "half a mile" : `${radius} miles`} of you`
+                      : q.trim()
+                        ? `Nothing matching "${q.trim()}" just now`
+                        : savedOnly
+                          ? "Nothing saved yet"
+                          : typeFilter === "food"
+                            ? "No food going right now"
+                            : "Nothing here right now"}
                 </b>
+
+                {/* An app with nothing in it anywhere is not having a quiet
+                    afternoon — it is new. Saying so plainly, and offering the
+                    two things a first neighbour can actually do, is worth more
+                    than furniture invented to hide it. */}
+                {opening && (
+                  <>
+                    <span>
+                      Nothing has been listed near you yet — which means you're early. The first
+                      thing on a street is the one everybody remembers.
+                    </span>
+                    <button
+                      className="primary-btn"
+                      onClick={() => {
+                        if (needsAccount("Sign in to give something away", { action: "give" })) return;
+                        setScreen("give");
+                      }}
+                    >
+                      Be the first to give something
+                    </button>
+                    <button
+                      className="ghost-btn"
+                      onClick={async () => {
+                        const line = "I'm on Doorstep — neighbours give things away and you collect them from the doorstep. Worth a look?";
+                        try {
+                          if (navigator.share) await navigator.share({ text: line });
+                          else {
+                            await navigator.clipboard.writeText(line);
+                            setToast("Copied — paste it to your neighbours.");
+                          }
+                        } catch {
+                          /* a cancelled share is not a failure worth mentioning */
+                        }
+                      }}
+                    >
+                      Invite a neighbour
+                    </button>
+                  </>
+                )}
 
                 {/* an empty screen looks broken. If things are going, just
                     further away, say so and open the door. */}
