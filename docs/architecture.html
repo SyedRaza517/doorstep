@@ -1,0 +1,735 @@
+<title>Doorstep System Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Instrument+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap">
+
+<style>
+  /* The document borrows the product's own design system, so reading it feels
+     like reading Doorstep rather than a generic technical note. */
+  :root {
+    --ground: #F3F4EF;
+    --surface: #FFFFFF;
+    --sunk: #E7E9E1;
+    --ink: #14261F;
+    --hush: #5F6D64;
+    --rule: #D3D8CE;
+    --railing: #234A3B;
+    --signal: #F5C518;
+    --brick: #A64B2A;
+    --accent-soft: rgba(35, 74, 59, 0.08);
+
+    --display: 'Bricolage Grotesque', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    --body: 'Instrument Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    --meter: 'DM Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0F1814;
+      --surface: #17241E;
+      --sunk: #1D2C25;
+      --ink: #EDEFE8;
+      --hush: #93A399;
+      --rule: #2C3F36;
+      --railing: #7FB79C;
+      --signal: #F5C518;
+      --brick: #D98763;
+      --accent-soft: rgba(127, 183, 156, 0.12);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0F1814;
+    --surface: #17241E;
+    --sunk: #1D2C25;
+    --ink: #EDEFE8;
+    --hush: #93A399;
+    --rule: #2C3F36;
+    --railing: #7FB79C;
+    --signal: #F5C518;
+    --brick: #D98763;
+    --accent-soft: rgba(127, 183, 156, 0.12);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .shell {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 24px 120px;
+  }
+
+  @media (min-width: 1040px) {
+    .shell {
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: 64px;
+      padding-right: 40px;
+    }
+  }
+
+  /* ---------- masthead ---------- */
+
+  header.masthead {
+    grid-column: 1 / -1;
+    padding: 76px 0 52px;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 56px;
+  }
+
+  .wordmark {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: 26px;
+    letter-spacing: -0.03em;
+    color: var(--railing);
+  }
+
+  .wordmark i {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--signal);
+    display: block;
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: clamp(38px, 6vw, 62px);
+    line-height: 1.04;
+    letter-spacing: -0.035em;
+    margin: 26px 0 18px;
+    text-wrap: balance;
+    max-width: 16ch;
+  }
+
+  .standfirst {
+    font-size: 20px;
+    line-height: 1.55;
+    color: var(--hush);
+    max-width: 60ch;
+    margin: 0;
+  }
+
+  .facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 26px;
+    margin-top: 34px;
+    font-family: var(--meter);
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    color: var(--hush);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .facts b { color: var(--ink); font-weight: 500; }
+
+  /* ---------- contents rail ---------- */
+
+  nav.rail { display: none; }
+
+  @media (min-width: 1040px) {
+    nav.rail {
+      display: block;
+      position: sticky;
+      top: 40px;
+      align-self: start;
+      font-size: 14px;
+    }
+    nav.rail p {
+      font-family: var(--meter);
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--hush);
+      margin: 0 0 14px;
+    }
+    nav.rail ol {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      counter-reset: rail;
+    }
+    nav.rail a {
+      color: var(--hush);
+      text-decoration: none;
+      display: block;
+      padding-left: 26px;
+      position: relative;
+      line-height: 1.35;
+    }
+    nav.rail li { counter-increment: rail; }
+    nav.rail a::before {
+      content: counter(rail, decimal-leading-zero);
+      position: absolute;
+      left: 0;
+      font-family: var(--meter);
+      font-size: 11px;
+      color: var(--rule);
+    }
+    nav.rail a:hover { color: var(--railing); }
+  }
+
+  /* ---------- prose ---------- */
+
+  main { min-width: 0; }
+
+  section { margin-bottom: 78px; scroll-margin-top: 32px; }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: 30px;
+    letter-spacing: -0.025em;
+    line-height: 1.15;
+    margin: 0 0 6px;
+  }
+
+  .kicker {
+    font-family: var(--meter);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--hush);
+    margin: 0 0 10px;
+  }
+
+  h3 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 20px;
+    letter-spacing: -0.015em;
+    margin: 40px 0 8px;
+  }
+
+  p { max-width: 66ch; margin: 0 0 18px; }
+
+  a { color: var(--railing); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:hover { color: var(--brick); }
+
+  code {
+    font-family: var(--meter);
+    font-size: 0.88em;
+    background: var(--accent-soft);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  strong { font-weight: 600; }
+
+  /* ---------- figures ---------- */
+
+  figure {
+    margin: 34px 0;
+    padding: 26px 22px 18px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 14px;
+    overflow-x: auto;
+  }
+
+  figure svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+
+  figcaption {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--rule);
+    font-size: 14.5px;
+    line-height: 1.5;
+    color: var(--hush);
+    max-width: 68ch;
+  }
+
+  figcaption b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- tables ---------- */
+
+  .table-wrap { overflow-x: auto; margin: 26px 0; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 15px;
+    min-width: 520px;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 11px 14px 11px 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+
+  th {
+    font-family: var(--meter);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--hush);
+    font-weight: 500;
+    border-bottom-color: var(--ink);
+  }
+
+  td:first-child { font-family: var(--meter); font-size: 13.5px; white-space: nowrap; padding-right: 22px; }
+  td.plain-first:first-child { font-family: var(--body); font-size: 15px; }
+
+  /* ---------- callouts ---------- */
+
+  .note {
+    border-left: 3px solid var(--signal);
+    background: var(--sunk);
+    padding: 16px 20px;
+    border-radius: 0 10px 10px 0;
+    margin: 26px 0;
+    max-width: 68ch;
+  }
+
+  .note p { margin: 0; }
+  .note p + p { margin-top: 10px; }
+
+  .note.risk { border-left-color: var(--brick); }
+
+  .note-label {
+    font-family: var(--meter);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--hush);
+    display: block;
+    margin-bottom: 6px;
+  }
+
+  /* ---------- pieces list ---------- */
+
+  .pieces { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 12px; overflow: hidden; margin: 26px 0; }
+
+  @media (min-width: 720px) { .pieces { grid-template-columns: 1fr 1fr; } }
+
+  .piece { background: var(--surface); padding: 18px 20px; }
+  .piece h4 { font-family: var(--meter); font-size: 13px; margin: 0 0 5px; font-weight: 500; color: var(--railing); }
+  .piece p { font-size: 14.5px; line-height: 1.5; margin: 0; color: var(--hush); max-width: none; }
+
+  footer {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--rule);
+    padding-top: 24px;
+    font-size: 14px;
+    color: var(--hush);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { scroll-behavior: auto !important; }
+  }
+
+  a:focus-visible, nav.rail a:focus-visible {
+    outline: 2px solid var(--railing);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+</style>
+
+<div class="shell">
+
+  <header class="masthead">
+    <div class="wordmark">Doorstep <i></i></div>
+    <h1>How Doorstep is put together</h1>
+    <p class="standfirst">One web app, wrapped for two phone stores, talking to one Express server and one Postgres database. Everything below is what actually ships — read off the code, not the plan.</p>
+    <div class="facts">
+      <span><b>25</b> tables</span>
+      <span><b>69</b> API routes</span>
+      <span><b>11</b> server modules</span>
+      <span><b>78</b> tests</span>
+      <span><b>1</b> codebase for web, Android and iOS</span>
+    </div>
+  </header>
+
+  <nav class="rail" aria-label="Contents">
+    <p>Contents</p>
+    <ol>
+      <li><a href="#shape">The shape of it</a></li>
+      <li><a href="#pieces">The pieces</a></li>
+      <li><a href="#stored">What's stored</a></li>
+      <li><a href="#claim">Two people, one sofa</a></li>
+      <li><a href="#wish">How a wish finds you</a></li>
+      <li><a href="#photos">Why the feed is small</a></li>
+      <li><a href="#runs">Where it runs</a></li>
+      <li><a href="#rules">Rules held in code</a></li>
+      <li><a href="#fragile">What's fragile</a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+    <section id="shape">
+      <p class="kicker">01</p>
+      <h2>The shape of it</h2>
+      <p>There is one application. It is a React app that builds into a folder of static files, and that same folder is served three ways: as a website, and as the contents of an Android app and an iOS app. Capacitor is the wrapper that turns the folder into the two native apps — it does not rewrite anything, it just puts the web app inside a native shell and hands it a few native abilities like the camera and vibration.</p>
+      <p>That app talks to one server over ordinary HTTP requests, plus one long-lived connection used to push alerts down. The server is the only thing that touches the database, and the only thing holding any secret.</p>
+
+      <figure>
+        <svg viewBox="0 0 880 470" role="img" aria-label="One web build is wrapped as an Android app, an iOS app and a website; all three call one Express API, which is the only component that reads and writes the Postgres database and the only one that calls external services.">
+          <defs>
+            <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path>
+            </marker>
+            <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="#A64B2A"></path>
+            </marker>
+          </defs>
+
+          <text x="24" y="26" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.55" letter-spacing="1.4">ONE BUILD, THREE DELIVERIES</text>
+          <rect x="24" y="40" width="228" height="150" rx="10" fill="none" stroke="currentColor" stroke-opacity="0.28" stroke-dasharray="4 4"></rect>
+          <rect x="44" y="62" width="188" height="34" rx="7" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="138" y="84" text-anchor="middle" font-size="13" fill="currentColor">Android app</text>
+          <rect x="44" y="104" width="188" height="34" rx="7" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="138" y="126" text-anchor="middle" font-size="13" fill="currentColor">iOS app</text>
+          <rect x="44" y="146" width="188" height="34" rx="7" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="138" y="168" text-anchor="middle" font-size="13" fill="currentColor">Website</text>
+
+          <line x1="252" y1="115" x2="352" y2="115" stroke="currentColor" stroke-width="1.6" marker-end="url(#a1)"></line>
+          <text x="302" y="106" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.75">HTTPS</text>
+
+          <rect x="356" y="60" width="200" height="110" rx="10" fill="none" stroke="currentColor" stroke-width="2"></rect>
+          <text x="456" y="102" text-anchor="middle" font-family="Bricolage Grotesque, sans-serif" font-weight="600" font-size="17" fill="currentColor">Express API</text>
+          <text x="456" y="124" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.7">69 routes · sessions</text>
+          <text x="456" y="142" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.7">every rule lives here</text>
+
+          <line x1="456" y1="170" x2="456" y2="238" stroke="currentColor" stroke-width="1.6" marker-end="url(#a1)"></line>
+          <text x="466" y="208" font-size="11" fill="currentColor" opacity="0.75">reads / writes</text>
+
+          <rect x="356" y="242" width="200" height="78" rx="10" fill="none" stroke="currentColor" stroke-width="2"></rect>
+          <text x="456" y="272" text-anchor="middle" font-family="Bricolage Grotesque, sans-serif" font-weight="600" font-size="17" fill="currentColor">Postgres</text>
+          <text x="456" y="294" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.7">25 tables</text>
+
+          <line x1="556" y1="90" x2="656" y2="90" stroke="currentColor" stroke-width="1.4" marker-end="url(#a1)"></line>
+          <rect x="660" y="62" width="196" height="56" rx="8" fill="none" stroke="currentColor" stroke-opacity="0.55"></rect>
+          <text x="758" y="84" text-anchor="middle" font-size="12.5" fill="currentColor">postcodes.io · OSM</text>
+          <text x="758" y="103" text-anchor="middle" font-size="12.5" fill="currentColor">Open-Meteo</text>
+
+          <line x1="556" y1="140" x2="656" y2="140" stroke="currentColor" stroke-width="1.4" marker-end="url(#a1)"></line>
+          <rect x="660" y="126" width="196" height="42" rx="8" fill="none" stroke="currentColor" stroke-opacity="0.55"></rect>
+          <text x="758" y="152" text-anchor="middle" font-size="12.5" fill="currentColor">Claude API (optional)</text>
+
+          <path d="M356 118 C 300 118, 288 250, 252 250" stroke="#A64B2A" stroke-width="1.8" fill="none" marker-end="url(#a2)"></path>
+          <text x="196" y="272" font-size="11.5" fill="#A64B2A">live alerts (SSE)</text>
+          <text x="196" y="290" font-size="11" fill="#A64B2A" opacity="0.8">server → app, one way</text>
+
+          <text x="24" y="360" font-size="13" fill="currentColor" opacity="0.6">The phone never talks to the database, and never holds a key.</text>
+          <line x1="24" y1="380" x2="856" y2="380" stroke="currentColor" stroke-opacity="0.18"></line>
+          <text x="24" y="408" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.5" letter-spacing="1.2">SECRETS LIVE ON THE SERVER ONLY — DATABASE PASSWORD, AI KEY, ADDRESS-LOOKUP KEY</text>
+        </svg>
+        <figcaption><b>One build, three deliveries.</b> The same files run on the web and inside both phone apps, so a change ships everywhere at once. The red line is the only channel that flows the other way — the server pushing an alert to an app that happens to be open.</figcaption>
+      </figure>
+    </section>
+
+    <section id="pieces">
+      <p class="kicker">02</p>
+      <h2>The pieces</h2>
+      <p>Eleven files on the server, each with one job. The big one is <code>index.js</code> — it holds every route and every rule. The rest are things worth keeping separate because they talk to the outside world or hold a self-contained piece of thinking.</p>
+
+      <div class="pieces">
+        <div class="piece"><h4>index.js</h4><p>All 69 routes, sessions, permissions, and the live-alert stream. The rules of the app are here.</p></div>
+        <div class="piece"><h4>db.js</h4><p>The schema, the connection, and the demo neighbourhood. Speaks to real Postgres or an in-process one for tests.</p></div>
+        <div class="piece"><h4>geo.js</h4><p>Postcode to coordinates, distance between two points, and the blurring that keeps a pin off a front door.</p></div>
+        <div class="piece"><h4>matching.js</h4><p>Whether a listing answers a wish — folds plurals and household synonyms, so "bookcase" finds "shelving unit".</p></div>
+        <div class="piece"><h4>address.js</h4><p>Postcode to a real address. Uses a licensed provider when a key exists, otherwise names the street and asks for the number.</p></div>
+        <div class="piece"><h4>autospec.js</h4><p>Photograph to product: the name, maker and dimensions, with alternatives to choose from.</p></div>
+        <div class="piece"><h4>moderate.js</h4><p>Checks a listing before it goes live. Fails open — moderation must never stop a neighbourhood sharing.</p></div>
+        <div class="piece"><h4>ai.js</h4><p>The small language jobs: understanding a typed sentence, suggesting a reply, translating a message.</p></div>
+        <div class="piece"><h4>weather.js</h4><p>Asks the sky whether rain is coming, so a doorstep listing can be shortened or postponed.</p></div>
+        <div class="piece"><h4>impact.js</h4><p>Turns collected items into weight diverted and cost avoided, using published reuse figures.</p></div>
+        <div class="piece"><h4>setup.js</h4><p>Creates the schema against a fresh database. Run once when pointing at a new Supabase project.</p></div>
+      </div>
+
+      <p>On the client side there are effectively two files: <code>App.jsx</code> holds every screen, and <code>styles.css</code> holds the whole design system. This is unusual and deliberate — one file means no hunting, and the screens share so much state that splitting them would mostly move the complexity into wiring.</p>
+    </section>
+
+    <section id="stored">
+      <p class="kicker">03</p>
+      <h2>What's stored</h2>
+      <p>Twenty-five tables. They group into six families, and knowing the families is enough to find anything.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Family</th><th>Tables</th><th>What it holds</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="plain-first">People</td><td>users · sessions · blocks · follows · no_shows · ratings · thanks</td><td>Who someone is, how they've behaved, and who they'd rather not see.</td></tr>
+            <tr><td class="plain-first">Things</td><td>items · saves · reports · lineage_notes · events</td><td>Every listing, ask and open-doorstep sale, plus what people saved or reported.</td></tr>
+            <tr><td class="plain-first">Wanting</td><td>wishes · wish_hits · wish_told</td><td>What people are waiting for, and a memory of who has already been told about what.</td></tr>
+            <tr><td class="plain-first">Arranging</td><td>conversations · messages · message_translations · claim_requests · notifications</td><td>One thread per claim, the messages in it, and the alerts raised.</td></tr>
+            <tr><td class="plain-first">The street</td><td>spots · spot_takes · spot_reports</td><td>Kerbside piles neighbours spotted, which nobody owns.</td></tr>
+            <tr><td class="plain-first">Caches</td><td>postcode_cache · street_cache</td><td>Answers from outside services, kept so the same question is never paid for twice.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note">
+        <span class="note-label">A deliberate absence</span>
+        <p>There is no table of street pages, badges or impact figures. Every one of those is computed when asked, from the tables above. A stored counter drifts the moment anything unusual happens; a number derived on read cannot.</p>
+      </div>
+    </section>
+
+    <section id="claim">
+      <p class="kicker">04</p>
+      <h2>Two people, one sofa</h2>
+      <p>The hardest problem in the app is two neighbours tapping <em>Claim</em> on the same sofa in the same second. Both requests arrive; both read a sofa that looks available; without care, both would be told they had it, and one would walk to a stranger's door for nothing.</p>
+      <p>The fix is a database row lock. The first request to arrive locks that item's row for the length of a short transaction. The second request does not fail — it <em>waits</em> at that line, and when it finally reads the row, the sofa is already claimed, so it gets an honest answer instead of a second promise.</p>
+
+      <figure>
+        <svg viewBox="0 0 860 400" role="img" aria-label="Two simultaneous claim requests. The first locks the item row, sets the holder and commits. The second waits at the lock, then reads the now-claimed row and receives a refusal.">
+          <defs>
+            <marker id="b1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path>
+            </marker>
+            <marker id="b2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="#A64B2A"></path>
+            </marker>
+          </defs>
+
+          <text x="20" y="24" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.55" letter-spacing="1.4">SAME MILLISECOND</text>
+
+          <rect x="20" y="44" width="150" height="46" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+          <text x="95" y="72" text-anchor="middle" font-size="13.5" fill="currentColor">Maya taps Claim</text>
+
+          <rect x="20" y="252" width="150" height="46" rx="8" fill="none" stroke="#A64B2A" stroke-width="1.5"></rect>
+          <text x="95" y="280" text-anchor="middle" font-size="13.5" fill="#A64B2A">Tom taps Claim</text>
+
+          <line x1="170" y1="67" x2="256" y2="67" stroke="currentColor" stroke-width="1.5" marker-end="url(#b1)"></line>
+          <line x1="170" y1="275" x2="256" y2="275" stroke="#A64B2A" stroke-width="1.5" marker-end="url(#b2)"></line>
+
+          <rect x="260" y="34" width="330" height="120" rx="10" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+          <text x="276" y="58" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.6" letter-spacing="1.2">TRANSACTION 1</text>
+          <text x="276" y="82" font-size="13" fill="currentColor">1 · lock this item's row</text>
+          <text x="276" y="104" font-size="13" fill="currentColor">2 · still free? yes</text>
+          <text x="276" y="126" font-size="13" fill="currentColor">3 · set holder + 30-minute hold</text>
+          <text x="276" y="146" font-size="12" fill="currentColor" opacity="0.65">commit — lock released</text>
+
+          <rect x="260" y="212" width="330" height="126" rx="10" fill="none" stroke="#A64B2A" stroke-width="1.6"></rect>
+          <text x="276" y="236" font-family="DM Mono, monospace" font-size="11" fill="#A64B2A" opacity="0.8" letter-spacing="1.2">TRANSACTION 2</text>
+          <text x="276" y="260" font-size="13" fill="#A64B2A">1 · asks for the same row…</text>
+          <text x="276" y="282" font-size="13" fill="#A64B2A" opacity="0.75">…waits here until 1 commits</text>
+          <text x="276" y="304" font-size="13" fill="#A64B2A">2 · still free? no</text>
+          <text x="276" y="326" font-size="13" fill="#A64B2A">3 · refuse, honestly</text>
+
+          <path d="M425 154 L425 212" stroke="currentColor" stroke-opacity="0.45" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#b1)"></path>
+          <text x="436" y="188" font-size="11.5" fill="currentColor" opacity="0.7">the wait</text>
+
+          <line x1="590" y1="94" x2="676" y2="94" stroke="currentColor" stroke-width="1.5" marker-end="url(#b1)"></line>
+          <rect x="680" y="66" width="160" height="56" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+          <text x="760" y="90" text-anchor="middle" font-size="13" fill="currentColor">Address released</text>
+          <text x="760" y="110" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.7">thread opens</text>
+
+          <line x1="590" y1="275" x2="676" y2="275" stroke="#A64B2A" stroke-width="1.5" marker-end="url(#b2)"></line>
+          <rect x="680" y="247" width="160" height="56" rx="8" fill="none" stroke="#A64B2A" stroke-width="1.5"></rect>
+          <text x="760" y="271" text-anchor="middle" font-size="13" fill="#A64B2A">"Someone beat</text>
+          <text x="760" y="290" text-anchor="middle" font-size="13" fill="#A64B2A">you to it"</text>
+        </svg>
+        <figcaption><b>The lock is what makes the promise true.</b> Tom's request is not rejected for being slow — it is made to wait until the answer is knowable, then told the truth. The same pattern guards handing an item back, bundling extra items onto one trip, and a giver picking from raised hands.</figcaption>
+      </figure>
+    </section>
+
+    <section id="wish">
+      <p class="kicker">05</p>
+      <h2>How a wish finds you</h2>
+      <p>Someone says they're after a high chair. Later, a neighbour lists one. What happens between those two moments is the app's best feature, and it has four steps.</p>
+
+      <figure>
+        <svg viewBox="0 0 860 396" role="img" aria-label="A new listing is compared against every wish by words and distance; matches are checked against a record of who has already been told; survivors get a stored notification and, if the app is open, a live push. If the app is closed the alert waits until next opening.">
+          <defs>
+            <marker id="c1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path>
+            </marker>
+            <marker id="c2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="#A64B2A"></path>
+            </marker>
+          </defs>
+
+          <rect x="18" y="120" width="146" height="62" rx="9" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+          <text x="91" y="146" text-anchor="middle" font-size="13.5" fill="currentColor">New listing</text>
+          <text x="91" y="166" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.7">"Highchair, clean"</text>
+
+          <line x1="164" y1="151" x2="216" y2="151" stroke="currentColor" stroke-width="1.5" marker-end="url(#c1)"></line>
+
+          <rect x="220" y="104" width="164" height="94" rx="9" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+          <text x="302" y="128" text-anchor="middle" font-size="13.5" fill="currentColor">Does it match?</text>
+          <text x="302" y="150" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.72">words, folded</text>
+          <text x="302" y="168" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.72">category</text>
+          <text x="302" y="186" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.72">their own radius</text>
+
+          <line x1="384" y1="151" x2="436" y2="151" stroke="currentColor" stroke-width="1.5" marker-end="url(#c1)"></line>
+
+          <rect x="440" y="112" width="164" height="78" rx="9" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+          <text x="522" y="138" text-anchor="middle" font-size="13.5" fill="currentColor">Told already?</text>
+          <text x="522" y="160" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.72">remembered against</text>
+          <text x="522" y="178" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.72">the person, not the wish</text>
+
+          <line x1="604" y1="151" x2="656" y2="151" stroke="currentColor" stroke-width="1.5" marker-end="url(#c1)"></line>
+
+          <rect x="660" y="112" width="182" height="78" rx="9" fill="none" stroke="currentColor" stroke-width="1.8"></rect>
+          <text x="751" y="138" text-anchor="middle" font-size="13.5" fill="currentColor">Alert written</text>
+          <text x="751" y="160" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.72">stored in the database</text>
+          <text x="751" y="178" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.72">— it cannot be lost</text>
+
+          <path d="M751 190 L751 250" stroke="currentColor" stroke-width="1.5" marker-end="url(#c1)"></path>
+
+          <rect x="620" y="254" width="222" height="52" rx="9" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="731" y="277" text-anchor="middle" font-size="12.5" fill="currentColor">App open → arrives instantly</text>
+          <text x="731" y="295" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.65">down the live connection</text>
+
+          <path d="M620 280 L470 280" stroke="#A64B2A" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#c2)"></path>
+
+          <rect x="248" y="254" width="218" height="52" rx="9" fill="none" stroke="#A64B2A" stroke-width="1.5"></rect>
+          <text x="357" y="277" text-anchor="middle" font-size="12.5" fill="#A64B2A">App closed → waits</text>
+          <text x="357" y="295" text-anchor="middle" font-size="11.5" fill="#A64B2A" opacity="0.85">seen at next opening</text>
+
+          <text x="18" y="348" font-size="12.5" fill="#A64B2A">The gap: with the app closed there is no phone notification yet — the alert is safe, but not timely.</text>
+          <text x="18" y="370" font-size="12.5" fill="currentColor" opacity="0.6">Closing it means native push (Firebase for Android, Apple's service for iOS) or email as a cheaper stand-in.</text>
+        </svg>
+        <figcaption><b>Nothing is lost, but not everything is fast.</b> Every alert is written to the database first, so it survives a restart. The live connection is an accelerator on top — and today it only reaches an app that is open, which is the single most consequential gap in the system.</figcaption>
+      </figure>
+
+      <p>Step three is subtler than it looks. "Have we told this person already?" is remembered against <strong>the person and the item</strong>, not the wish. That means deleting a wish and adding it back doesn't replay alerts someone has already read, and two wishes that both match one sofa still produce one alert rather than two.</p>
+    </section>
+
+    <section id="photos">
+      <p class="kicker">06</p>
+      <h2>Why the feed is small</h2>
+      <p>Photographs are the heaviest thing in an app like this, and a feed of two hundred listings is where a naive design collapses. Doorstep never sends the same photograph twice.</p>
+
+      <figure>
+        <svg viewBox="0 0 860 300" role="img" aria-label="Listings store a short pointer to a photo rather than the image itself; the feed sends pointers, and the browser fetches each image once from a cached endpoint and reuses it across every card.">
+          <defs>
+            <marker id="d1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path>
+            </marker>
+          </defs>
+
+          <text x="18" y="24" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.55" letter-spacing="1.4">THE FEED RESPONSE</text>
+          <rect x="18" y="38" width="250" height="128" rx="9" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+          <text x="36" y="64" font-family="DM Mono, monospace" font-size="12" fill="currentColor">item 56 → ref:real-7</text>
+          <text x="36" y="88" font-family="DM Mono, monospace" font-size="12" fill="currentColor">item 57 → ref:real-2</text>
+          <text x="36" y="112" font-family="DM Mono, monospace" font-size="12" fill="currentColor">item 58 → ref:real-7</text>
+          <text x="36" y="144" font-size="12.5" fill="currentColor" opacity="0.7">pointers, not pictures</text>
+
+          <line x1="268" y1="102" x2="340" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#d1)"></line>
+          <text x="304" y="93" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.7">~2 KB</text>
+
+          <rect x="344" y="62" width="190" height="82" rx="9" fill="none" stroke="currentColor" stroke-width="1.8"></rect>
+          <text x="439" y="92" text-anchor="middle" font-size="13.5" fill="currentColor">The app</text>
+          <text x="439" y="114" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.7">asks for each picture</text>
+          <text x="439" y="132" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.7">exactly once</text>
+
+          <line x1="534" y1="102" x2="606" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#d1)"></line>
+
+          <rect x="610" y="62" width="232" height="82" rx="9" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+          <text x="726" y="90" text-anchor="middle" font-size="13.5" fill="currentColor">/api/photos/real-7</text>
+          <text x="726" y="112" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.7">served once, then cached</text>
+          <text x="726" y="130" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.7">by the browser forever</text>
+
+          <line x1="726" y1="144" x2="726" y2="196" stroke="currentColor" stroke-opacity="0.5" stroke-width="1.4" stroke-dasharray="5 4"></line>
+          <text x="738" y="176" font-size="11.5" fill="currentColor" opacity="0.7">reused by every card that points at it</text>
+
+          <text x="18" y="222" font-size="13" fill="currentColor" opacity="0.75">A neighbour's own camera photo works the same way — shrunk on the phone to about 900 pixels before it is ever uploaded.</text>
+          <line x1="18" y1="244" x2="842" y2="244" stroke="currentColor" stroke-opacity="0.18"></line>
+          <text x="18" y="272" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.5" letter-spacing="1.2">RESULT — A PAGE OF LISTINGS COSTS KILOBYTES, NOT MEGABYTES</text>
+        </svg>
+        <figcaption><b>Send the address of the picture, not the picture.</b> Two hundred listings share a small library of images, so the feed stays tiny and the browser's own cache does the heavy lifting.</figcaption>
+      </figure>
+    </section>
+
+    <section id="runs">
+      <p class="kicker">07</p>
+      <h2>Where it runs</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Part</th><th>Runs on</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td class="plain-first">Web app</td><td>Vercel</td><td>Static files. Rebuilt and redeployed on every push.</td></tr>
+            <tr><td class="plain-first">API</td><td>Render</td><td>One Node process. Holds every secret.</td></tr>
+            <tr><td class="plain-first">Database</td><td>Supabase (Postgres)</td><td>Currently 12 MB of a 500 MB allowance.</td></tr>
+            <tr><td class="plain-first">Android app</td><td>Google Play</td><td>Package <code>uk.co.doorstep.app</code>, version 1.2 (build 4).</td></tr>
+            <tr><td class="plain-first">iOS app</td><td>App Store</td><td>Same version. Needs a Mac to build.</td></tr>
+            <tr><td class="plain-first">Tests</td><td>Anywhere</td><td>78 tests against a real server and a throwaway Postgres that runs inside Node.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The tests deserve a note. They don't use mock objects that pretend to be a database — they start the actual server against a real Postgres compiled to run inside Node, exercise the real routes, and throw the database away afterwards. That is why they catch things like the claim race, which a mocked test would sail straight past.</p>
+    </section>
+
+    <section id="rules">
+      <p class="kicker">08</p>
+      <h2>Rules held in code</h2>
+      <p>Some decisions are not features but constraints, enforced in one place so they cannot be forgotten in another.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td class="plain-first">Addresses hidden until claimed</td><td>The map pin is blurred to roughly a street block for everyone else, and the written address is released to exactly one person for the length of their hold.</td></tr>
+            <tr><td class="plain-first">Never the pavement</td><td>Leaving goods on public land is fly-tipping, with fines up to £1,000. Every collection spot offered is on private property.</td></tr>
+            <tr><td class="plain-first">Banned items refused</td><td>Medicines, weapons, car seats, cot mattresses and the rest are refused by a plain word check before any AI is consulted — so the hard bans never depend on a key being configured.</td></tr>
+            <tr><td class="plain-first">Three households minimum</td><td>A street page needs three verified homes before it shows any numbers. A page about one household is a page about one person.</td></tr>
+            <tr><td class="plain-first">Demo data owns up</td><td>The demo neighbourhood only seeds a local database, and every seeded listing is labelled, because its addresses are real Hackney streets.</td></tr>
+            <tr><td class="plain-first">AI is never required</td><td>Every AI feature answers "nothing" without a key, and the app carries on unchanged. Moderation in particular fails open.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="fragile">
+      <p class="kicker">09</p>
+      <h2>What's fragile</h2>
+      <p>An honest architecture document names what will break first.</p>
+
+      <div class="note risk">
+        <span class="note-label">Alerts don't reach a closed app</span>
+        <p>The live connection only works while the app is open, and the free server tier sleeps after fifteen minutes and severs it. For an app whose promise is a fast alert on a two-hour window, this is the most consequential gap. Native push is the real fix; email is the cheap one.</p>
+      </div>
+
+      <div class="note risk">
+        <span class="note-label">Photos live in the database</span>
+        <p>User photographs are stored as text in Postgres. At roughly 50–150 KB each against a 500 MB allowance, that is a few thousand listings before it hurts. Moving them to file storage and keeping only a link is a day's work, and much easier before there is real data than after.</p>
+      </div>
+
+      <div class="note risk">
+        <span class="note-label">No backups on the free tier</span>
+        <p>The database has no snapshot behind it, and the project pauses after seven quiet days. A scheduled dump to somewhere else — and one tested restore — is the cheapest insurance available.</p>
+      </div>
+
+      <div class="note">
+        <span class="note-label">Deliberately not fragile</span>
+        <p>Lapsed holds, street pages, badges and impact figures are all computed when asked rather than stored, so there is no background job to fail and no counter to drift. That choice costs a little processing and removes a whole category of bug.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    Doorstep · TwelveTech Systems Limited. Describes the codebase as it stands — 25 tables, 69 routes, 78 tests passing.
+  </footer>
+
+</div>

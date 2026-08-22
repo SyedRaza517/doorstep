@@ -781,7 +781,10 @@ export default function Doorstep() {
   const [hints, setHints] = useState([]);
   const [hintsOpen, setHintsOpen] = useState(false);
   const [sort, setSort] = useState("time");
-  const [radius, setRadius] = useState(2);
+  /* Half a mile, not two. A neighbourhood you can carry a bookcase across is
+     the whole promise, and a wide radius at launch only hides an empty feed
+     behind other people's streets. */
+  const [radius, setRadius] = useState(0.5);
   const [customRadius, setCustomRadius] = useState(false);
   const [items, setItems] = useState([]);
   /* how the current page relates to the whole result: total, whether there is

@@ -1,0 +1,17 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "title": "A · Editorial", "x": 0, "y": 0, "w": 1200, "h": 1200 },
+    { "file": "Product.dc.html", "title": "B · Product", "x": 1320, "y": 0, "w": 1200, "h": 1200 },
+    { "file": "Scene.dc.html", "title": "C · Doorstep scene", "x": 2640, "y": 0, "w": 1200, "h": 1200 }
+  ],
+  "annotations": [
+    {
+      "id": "brief",
+      "x": 0,
+      "y": -190,
+      "w": 640,
+      "text": "Three directions for the LinkedIn 'coming soon' post, 1200×1200 (square reads largest in the feed).\n\nA leads with the promise, B shows the product, C leads with the metaphor. Pick one and I'll finish it and cut a 1200×627 landscape version to match."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

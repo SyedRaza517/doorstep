@@ -1,0 +1,68 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Instrument+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; }
+    /* the app sets this globally; an artboard is its own document and needs it
+       too, or height:100% plus padding overflows the frame */
+    *, *::before, *::after { box-sizing: border-box; }
+    a { color: #F5C518; } a:hover { color: #ffd84d; }
+  </style>
+</helmet>
+
+<div style="position: relative; width: 1200px; height: 1200px; overflow: hidden; background: #234A3B; font-family: 'Instrument Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+
+  <div style="position: absolute; top: -180px; right: -160px; width: 780px; height: 780px; border-radius: 50%; background: radial-gradient(circle, rgba(96, 152, 126, 0.55), rgba(96, 152, 126, 0) 70%); filter: blur(40px);"></div>
+
+  <div style="position: relative; height: 100%; display: flex; flex-direction: column; justify-content: space-between; padding: 76px 80px;">
+
+    <div style="display: flex; align-items: center; gap: 14px;">
+      <span style="font-family: 'Bricolage Grotesque', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-weight: 800; font-size: 46px; letter-spacing: -0.03em; line-height: 1; color: #F7F5EC;">Doorstep</span>
+      <span style="width: 17px; height: 17px; border-radius: 50%; background: #F5C518; margin-top: 4px;"></span>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 30px; max-width: 940px;">
+      <h1 style="margin: 0; font-family: 'Bricolage Grotesque', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-weight: 800; font-size: 96px; line-height: 1.03; letter-spacing: -0.035em; color: #F7F5EC; text-wrap: balance;">Your neighbours are giving things away.</h1>
+      <p style="margin: 0; font-size: 29px; line-height: 1.45; color: rgba(247, 245, 236, 0.72); max-width: 760px;">Free things from the doorsteps on your street — claimed in a tap, carried home on foot.</p>
+    </div>
+
+    <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 40px;">
+      <div style="display: flex; flex-direction: column; gap: 18px;">
+        <span style="display: inline-flex; align-items: center; gap: 12px; align-self: flex-start; background: #F5C518; color: #14261F; font-family: 'DM Mono', ui-monospace, monospace; font-weight: 500; font-size: 22px; letter-spacing: 0.14em; text-transform: uppercase; padding: 14px 24px; border-radius: 999px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9"></circle>
+            <path d="M12 7.2V12l3.4 2"></path>
+          </svg>
+          Coming soon
+        </span>
+        <span style="font-family: 'DM Mono', ui-monospace, monospace; font-size: 24px; letter-spacing: 0.1em; color: rgba(247, 245, 236, 0.6);">Hackney · London E8</span>
+      </div>
+
+      <svg width="124" height="124" viewBox="0 0 150 150" fill="none" aria-hidden="true">
+        <path d="M40 132V56L75 30l35 26v76" stroke="#F7F5EC" stroke-opacity="0.34" stroke-width="4" stroke-linejoin="round"></path>
+        <path d="M30 132h90" stroke="#F7F5EC" stroke-opacity="0.34" stroke-width="4" stroke-linecap="round"></path>
+        <rect x="61" y="74" width="28" height="58" rx="3" stroke="#F7F5EC" stroke-opacity="0.34" stroke-width="4"></rect>
+        <rect x="59" y="96" width="32" height="26" rx="3" fill="#F5C518"></rect>
+        <path d="M59 106h32M75 96v26" stroke="#234A3B" stroke-width="3.4"></path>
+      </svg>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
