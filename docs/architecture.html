@@ -376,6 +376,18 @@
       <li><a href="#rules">Rules held in code</a></li>
       <li><a href="#fragile">What's fragile</a></li>
     </ol>
+    <p style="margin-top:26px">Scaling</p>
+    <ol style="counter-reset: rail 9">
+      <li><a href="#arithmetic">The arithmetic first</a></li>
+      <li><a href="#walls">The three walls</a></li>
+      <li><a href="#target">The shape at a million</a></li>
+      <li><a href="#photos-fix">Wall one · photos</a></li>
+      <li><a href="#alerts-fix">Wall two · alerts</a></li>
+      <li><a href="#geo-fix">Wall three · finding</a></li>
+      <li><a href="#migrate">Changing engines mid-flight</a></li>
+      <li><a href="#budget">The latency budget</a></li>
+      <li><a href="#order">The order to do it in</a></li>
+    </ol>
   </nav>
 
   <main>
@@ -726,10 +738,429 @@
       </div>
     </section>
 
+
+    <div style="margin: 70px 0 10px; padding-top: 28px; border-top: 1px solid var(--rule);">
+      <p style="font-family: var(--meter); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--hush); margin: 0;">Part two</p>
+      <p style="font-family: var(--display); font-size: 27px; font-weight: 600; letter-spacing: -0.01em; margin: 8px 0 0; color: var(--ink);">Scaling to a million, without breaking what works</p>
+    </div>
+
+    <section id="arithmetic">
+      <p class="kicker">10</p>
+      <h2>The arithmetic first</h2>
+      <p>Before any architecture, the number that decides everything else. A million registered users, at a healthy eight per cent daily active, opening the app three times a day and making ten calls a session, is <strong>2.4 million API calls a day</strong>. Spread evenly that is 28 requests a second. Concentrated into the evening peak, call it <strong>140 a second</strong>.</p>
+
+      <div class="note">
+        <span class="note-label">The conclusion that shapes everything below</span>
+        <p>140 requests a second is small. One modest server handles it. <strong>Doorstep does not have a throughput problem at a million users — it has three design choices that do not survive a second server.</strong> Nothing below is about handling load. It is about removing the three things that make it impossible to run more than one copy of the app.</p>
+      </div>
+
+      <p>That is the good news, and it is worth being precise about why: this app is <em>hyperlocal</em>. Nobody ever asks for a national feed. Every query is bounded to a mile or two, so no single request ever needs more than a few dozen rows however many million exist. The workload shards naturally by geography, which is the friendliest possible shape a system can have.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>At a million users</th><th>Figure</th><th>Verdict</th></tr></thead>
+          <tbody>
+            <tr><td class="plain-first">Peak requests per second</td><td>~140</td><td>Comfortable on one server. Trivial across three.</td></tr>
+            <tr><td class="plain-first">Photo storage per month</td><td>~24 GB</td><td>Impossible inside Postgres. Pennies in object storage.</td></tr>
+            <tr><td class="plain-first">Item rows after five years</td><td>~12 million</td><td>Fine with the right index. Fatal without one.</td></tr>
+            <tr><td class="plain-first">Apps open at peak</td><td>~10,000</td><td>Fine across several instances. Impossible on one, as built today.</td></tr>
+            <tr><td class="plain-first">Alerts fanned out per day</td><td>~300,000</td><td>Fine on a worker. Not fine inside the giver's request.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="walls">
+      <p class="kicker">11</p>
+      <h2>The three walls</h2>
+      <p>Everything standing between here and a million users is one of three things, and they arrive in a known order at known sizes.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Wall</th><th>Hits at</th><th>What you actually see</th></tr></thead>
+          <tbody>
+            <tr><td class="plain-first">1 · Photos inside the database</td><td>~4,000 listings with photos</td><td>The database fills. Writes fail. Everything stops at once.</td></tr>
+            <tr><td class="plain-first">2 · Alerts held in one process's memory</td><td>The second server instance</td><td>Half your users silently stop getting alerts. Nothing errors.</td></tr>
+            <tr><td class="plain-first">3 · No index on location</td><td>~100,000 items</td><td>The feed gets slower every week until it times out.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Wall two is the important one and the least obvious. It is not a performance problem — it is a <em>correctness</em> problem, and it appears the moment you try to fix any other problem by adding a second server. Until it is gone the whole system is pinned to one machine: no redundancy, no zero-downtime deploys, no scaling out. It is the wall that hides all the others.</p>
+
+      <div class="note risk">
+        <span class="note-label">Verified against the code, not assumed</span>
+        <p>The indexes that exist today cover expiry, owner, claimer, notifications, spots and events. There is <strong>no index on <code>lat</code> or <code>lng</code></strong>. Separately, every authenticated request costs one extra database round trip to turn a bearer token into a user. Both are cheap to fix and neither announces itself until it is late.</p>
+      </div>
+    </section>
+
+    <section id="target">
+      <p class="kicker">12</p>
+      <h2>The shape at a million</h2>
+      <p>Here is where it needs to arrive. Four things are new: files live outside the database, alerts travel through a shared channel instead of one process's memory, slow work moves off the request, and reads spread across copies. Everything else — the routes, the tables, the app itself — is unchanged.</p>
+
+      <figure>
+        <svg viewBox="0 0 900 570" role="img" aria-label="Target architecture: apps reach a load balancer in front of several stateless API instances; photos come from object storage through a CDN; alerts fan out through a shared publish-subscribe channel and a push service; slow work runs on background workers pulled from a queue; the database has one primary for writes and read replicas.">
+          <defs>
+            <marker id="t1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path></marker>
+            <marker id="t2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#A64B2A"></path></marker>
+          </defs>
+
+          <rect x="16" y="122" width="118" height="58" rx="9" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+          <text x="75" y="147" text-anchor="middle" font-size="13" fill="currentColor">Phone apps</text>
+          <text x="75" y="166" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.65">and web</text>
+
+          <line x1="134" y1="151" x2="184" y2="151" stroke="currentColor" stroke-width="1.5" marker-end="url(#t1)"></line>
+
+          <rect x="188" y="123" width="96" height="56" rx="9" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+          <text x="236" y="147" text-anchor="middle" font-size="12.5" fill="currentColor">Load</text>
+          <text x="236" y="165" text-anchor="middle" font-size="12.5" fill="currentColor">balancer</text>
+
+          <text x="314" y="78" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.55" letter-spacing="1.3">STATELESS — ADD OR REMOVE FREELY</text>
+          <rect x="310" y="90" width="184" height="122" rx="10" fill="none" stroke="currentColor" stroke-opacity="0.3" stroke-dasharray="4 4"></rect>
+          <rect x="326" y="102" width="152" height="30" rx="6" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="402" y="122" text-anchor="middle" font-size="12.5" fill="currentColor">API instance</text>
+          <rect x="326" y="136" width="152" height="30" rx="6" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="402" y="156" text-anchor="middle" font-size="12.5" fill="currentColor">API instance</text>
+          <rect x="326" y="170" width="152" height="30" rx="6" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="402" y="190" text-anchor="middle" font-size="12.5" fill="currentColor">API instance</text>
+
+          <line x1="284" y1="151" x2="310" y2="151" stroke="currentColor" stroke-width="1.5" marker-end="url(#t1)"></line>
+
+          <rect x="16" y="238" width="268" height="62" rx="9" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+          <text x="150" y="263" text-anchor="middle" font-size="13" fill="currentColor">CDN → object storage</text>
+          <text x="150" y="283" text-anchor="middle" font-size="12" fill="currentColor" opacity="0.65">every photo, cached near the reader</text>
+          <path d="M75 180 L75 238" stroke="currentColor" stroke-width="1.5" marker-end="url(#t1)"></path>
+          <text x="84" y="214" font-size="11" fill="currentColor" opacity="0.7">images</text>
+
+          <rect x="556" y="90" width="152" height="56" rx="9" fill="#A64B2A" fill-opacity="0.09" stroke="#A64B2A" stroke-width="1.7"></rect>
+          <text x="632" y="113" text-anchor="middle" font-size="12.5" fill="#A64B2A">Shared channel</text>
+          <text x="632" y="132" text-anchor="middle" font-size="11.5" fill="#A64B2A" opacity="0.85">publish / subscribe</text>
+          <path d="M494 112 L556 112" stroke="#A64B2A" stroke-width="1.6" marker-end="url(#t2)"></path>
+          <path d="M556 130 L494 130" stroke="#A64B2A" stroke-width="1.6" marker-end="url(#t2)"></path>
+
+          <rect x="556" y="158" width="152" height="54" rx="9" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+          <text x="632" y="180" text-anchor="middle" font-size="12.5" fill="currentColor">Push service</text>
+          <text x="632" y="199" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.65">reaches closed apps</text>
+          <path d="M494 185 L556 185" stroke="currentColor" stroke-width="1.5" marker-end="url(#t1)"></path>
+          <path d="M632 212 C 632 330, 210 336, 80 190" stroke="currentColor" stroke-opacity="0.45" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#t1)"></path>
+          <text x="286" y="332" font-size="11" fill="currentColor" opacity="0.6">lands on the phone whether or not the app is open</text>
+
+          <rect x="556" y="228" width="152" height="66" rx="9" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+          <text x="632" y="252" text-anchor="middle" font-size="12.5" fill="currentColor">Queue + workers</text>
+          <text x="632" y="271" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.65">wish fan-out, AI checks,</text>
+          <text x="632" y="287" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.65">sweeps, digests</text>
+          <path d="M478 212 C 500 244, 524 258, 556 258" stroke="currentColor" stroke-width="1.5" marker-end="url(#t1)"></path>
+
+          <rect x="734" y="90" width="150" height="56" rx="9" fill="none" stroke="currentColor" stroke-width="1.3" stroke-opacity="0.75"></rect>
+          <text x="809" y="113" text-anchor="middle" font-size="12.5" fill="currentColor" opacity="0.85">Cache</text>
+          <text x="809" y="132" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.6">sessions, hot feeds</text>
+          <path d="M708 118 L734 118" stroke="currentColor" stroke-opacity="0.6" stroke-width="1.4" marker-end="url(#t1)"></path>
+
+          <text x="314" y="368" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.55" letter-spacing="1.3">ONE WRITER, MANY READERS</text>
+          <rect x="310" y="380" width="396" height="126" rx="10" fill="none" stroke="currentColor" stroke-opacity="0.3" stroke-dasharray="4 4"></rect>
+          <rect x="326" y="396" width="164" height="44" rx="7" fill="none" stroke="currentColor" stroke-width="1.8"></rect>
+          <text x="408" y="423" text-anchor="middle" font-size="13" fill="currentColor">Primary (writes)</text>
+          <rect x="326" y="448" width="164" height="44" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+          <text x="408" y="475" text-anchor="middle" font-size="13" fill="currentColor">Read replica</text>
+          <rect x="522" y="448" width="168" height="44" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+          <text x="606" y="475" text-anchor="middle" font-size="13" fill="currentColor">Read replica</text>
+          <path d="M408 440 L408 448" stroke="currentColor" stroke-opacity="0.5" stroke-width="1.3"></path>
+          <path d="M490 418 C 566 418, 606 428, 606 448" stroke="currentColor" stroke-opacity="0.5" stroke-width="1.3" stroke-dasharray="4 3"></path>
+          <text x="512" y="414" font-size="10.5" fill="currentColor" opacity="0.6">replication</text>
+
+          <path d="M402 212 L402 380" stroke="currentColor" stroke-width="1.5" marker-end="url(#t1)"></path>
+          <text x="412" y="252" font-size="11" fill="currentColor" opacity="0.7">writes → primary</text>
+          <text x="412" y="270" font-size="11" fill="currentColor" opacity="0.7">reads → replica</text>
+
+          <text x="16" y="546" font-size="12.5" fill="currentColor" opacity="0.65">Nothing here is exotic. It is the same application, with its state moved out of the process and its slow work moved off the request.</text>
+        </svg>
+        <figcaption><b>The only structural change is where state lives.</b> Today the API holds live connections in its own memory, and that single fact ties the whole system to one machine. Move it into a shared channel and every instance becomes disposable — which is what makes redundancy, rolling deploys and scaling out possible at all.</figcaption>
+      </figure>
+
+      <div class="pieces">
+        <div class="piece"><h4>What stays exactly as it is</h4><p>Every route, all 25 tables, the claim lock, photos-by-reference, the postcode cache, the tests. Nothing in the first half of this document is redesigned.</p></div>
+        <div class="piece"><h4>What is genuinely new</h4><p>Object storage with a CDN, a shared publish/subscribe channel, a job queue with workers, native push, a session cache and read replicas — added one at a time, each behind a flag.</p></div>
+      </div>
+    </section>
+
+    <section id="photos-fix">
+      <p class="kicker">13</p>
+      <h2>Wall one · photographs</h2>
+      <p>Today a photograph is stored as text inside the item's own row. It is simple, it works, and it stops working at about four thousand listings. A database is an expensive, transactional, backed-up place to keep bytes that never change and are never queried.</p>
+
+      <figure>
+        <svg viewBox="0 0 860 300" role="img" aria-label="Before: the app posts an image to the API, which stores the bytes in a Postgres column and serves them back through itself. After: the app uploads straight to object storage using a one-time link, the database keeps only a short key, and a CDN serves the bytes.">
+          <defs><marker id="p1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path></marker></defs>
+
+          <text x="18" y="24" font-family="DM Mono, monospace" font-size="11" fill="#A64B2A" letter-spacing="1.3">TODAY</text>
+          <rect x="18" y="38" width="112" height="46" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="74" y="66" text-anchor="middle" font-size="12.5" fill="currentColor">App</text>
+          <line x1="130" y1="61" x2="196" y2="61" stroke="currentColor" stroke-width="1.4" marker-end="url(#p1)"></line>
+          <text x="163" y="52" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.7">120 KB</text>
+          <rect x="200" y="38" width="112" height="46" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="256" y="66" text-anchor="middle" font-size="12.5" fill="currentColor">API</text>
+          <line x1="312" y1="61" x2="378" y2="61" stroke="currentColor" stroke-width="1.4" marker-end="url(#p1)"></line>
+          <rect x="382" y="38" width="196" height="46" rx="8" fill="#A64B2A" fill-opacity="0.1" stroke="#A64B2A" stroke-width="1.6"></rect>
+          <text x="480" y="66" text-anchor="middle" font-size="12.5" fill="#A64B2A">Postgres column</text>
+          <text x="596" y="56" font-size="12" fill="#A64B2A">500 MB ceiling — and every</text>
+          <text x="596" y="76" font-size="12" fill="#A64B2A">backup carries the bytes again</text>
+
+          <line x1="18" y1="112" x2="842" y2="112" stroke="currentColor" stroke-opacity="0.15"></line>
+
+          <text x="18" y="146" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.55" letter-spacing="1.3">AFTER</text>
+          <rect x="18" y="160" width="112" height="46" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="74" y="188" text-anchor="middle" font-size="12.5" fill="currentColor">App</text>
+
+          <path d="M130 176 L196 176" stroke="currentColor" stroke-width="1.4" marker-end="url(#p1)"></path>
+          <text x="163" y="168" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.7">1 · asks</text>
+          <rect x="200" y="153" width="112" height="46" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="256" y="181" text-anchor="middle" font-size="12.5" fill="currentColor">API</text>
+          <text x="256" y="222" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.7">hands back a one-time</text>
+          <text x="256" y="238" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.7">upload link</text>
+
+          <path d="M74 206 C 74 272, 380 274, 468 202" stroke="currentColor" stroke-width="1.6" marker-end="url(#p1)"></path>
+          <text x="330" y="292" text-anchor="middle" font-size="11.5" fill="currentColor">2 · the bytes go straight to storage and never touch the API</text>
+
+          <rect x="474" y="153" width="176" height="46" rx="8" fill="none" stroke="currentColor" stroke-width="1.7"></rect>
+          <text x="562" y="181" text-anchor="middle" font-size="12.5" fill="currentColor">Object storage</text>
+
+          <line x1="650" y1="176" x2="700" y2="176" stroke="currentColor" stroke-width="1.4" marker-end="url(#p1)"></line>
+          <rect x="704" y="153" width="138" height="46" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="773" y="181" text-anchor="middle" font-size="12.5" fill="currentColor">CDN edge</text>
+
+          <text x="474" y="226" font-size="11.5" fill="currentColor" opacity="0.7">3 · the database keeps a 40-character key. That is all it keeps.</text>
+        </svg>
+        <figcaption><b>The bytes stop travelling through the API at all.</b> The app asks for a one-time upload link, sends the photograph straight to storage, and tells the API the key. Uploads stop consuming server memory, the database shrinks back to text, and readers are served from an edge near them.</figcaption>
+      </figure>
+
+      <p>The reference indirection built today — <code>ref:slug</code> resolved through a photo route — is exactly the seam this slides into. The app already asks for a photo by name rather than carrying bytes around, so the change is confined to what that name resolves to.</p>
+
+      <div class="note">
+        <span class="note-label">What it costs</span>
+        <p>24 GB a month of photographs is a few pounds a month in object storage, and near-nothing in bandwidth once the CDN is caching. The same volume inside a managed Postgres is not purchasable at a sensible price at all. This is the rare change that makes the system both cheaper and faster.</p>
+      </div>
+    </section>
+
+    <section id="alerts-fix">
+      <p class="kicker">14</p>
+      <h2>Wall two · alerts</h2>
+      <p>This is the wall that decides whether the app can scale at all. When the server wants to alert someone it looks them up in a map held in that process's memory. That is perfect on one server and fails invisibly on two.</p>
+
+      <figure>
+        <svg viewBox="0 0 880 420" role="img" aria-label="With two API instances and an in-memory connection map, an alert raised on instance A cannot reach a user whose connection is held by instance B. With a shared publish-subscribe channel the alert is published once and every instance delivers to whichever users it holds.">
+          <defs>
+            <marker id="s1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path></marker>
+          </defs>
+
+          <text x="18" y="24" font-family="DM Mono, monospace" font-size="11" fill="#A64B2A" letter-spacing="1.3">TWO SERVERS, AS BUILT TODAY — THE SILENT FAILURE</text>
+
+          <rect x="18" y="42" width="150" height="52" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="93" y="64" text-anchor="middle" font-size="12.5" fill="currentColor">Maya lists a</text>
+          <text x="93" y="82" text-anchor="middle" font-size="12.5" fill="currentColor">high chair</text>
+
+          <line x1="168" y1="68" x2="222" y2="68" stroke="currentColor" stroke-width="1.4" marker-end="url(#s1)"></line>
+
+          <rect x="226" y="42" width="152" height="52" rx="8" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+          <text x="302" y="65" text-anchor="middle" font-size="12.5" fill="currentColor">Instance A</text>
+          <text x="302" y="84" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.65">holds Ana's connection</text>
+
+          <rect x="226" y="112" width="152" height="52" rx="8" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+          <text x="302" y="135" text-anchor="middle" font-size="12.5" fill="currentColor">Instance B</text>
+          <text x="302" y="154" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.65">holds Tom's connection</text>
+
+          <line x1="378" y1="68" x2="440" y2="68" stroke="currentColor" stroke-width="1.4" marker-end="url(#s1)"></line>
+          <text x="448" y="72" font-size="12.5" fill="currentColor">Ana is alerted.</text>
+
+          <path d="M378 100 L438 126" stroke="#A64B2A" stroke-width="1.5" stroke-dasharray="5 4"></path>
+          <line x1="422" y1="104" x2="450" y2="132" stroke="#A64B2A" stroke-width="2.2"></line>
+          <line x1="450" y1="104" x2="422" y2="132" stroke="#A64B2A" stroke-width="2.2"></line>
+          <text x="470" y="124" font-size="12.5" fill="#A64B2A">Tom hears nothing.</text>
+          <text x="470" y="144" font-size="11.5" fill="#A64B2A" opacity="0.85">No error is raised anywhere. Both servers look healthy.</text>
+
+          <line x1="18" y1="192" x2="862" y2="192" stroke="currentColor" stroke-opacity="0.15"></line>
+
+          <text x="18" y="226" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.55" letter-spacing="1.3">WITH A SHARED CHANNEL</text>
+
+          <rect x="18" y="244" width="150" height="52" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="93" y="275" text-anchor="middle" font-size="12.5" fill="currentColor">Maya lists it</text>
+
+          <line x1="168" y1="270" x2="222" y2="270" stroke="currentColor" stroke-width="1.4" marker-end="url(#s1)"></line>
+
+          <rect x="226" y="244" width="152" height="52" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+          <text x="302" y="275" text-anchor="middle" font-size="12.5" fill="currentColor">Any instance</text>
+
+          <line x1="378" y1="270" x2="430" y2="270" stroke="currentColor" stroke-width="1.5" marker-end="url(#s1)"></line>
+          <text x="404" y="262" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.7">publish</text>
+
+          <rect x="434" y="242" width="152" height="56" rx="9" fill="#A64B2A" fill-opacity="0.09" stroke="#A64B2A" stroke-width="1.7"></rect>
+          <text x="510" y="266" text-anchor="middle" font-size="12.5" fill="#A64B2A">Shared channel</text>
+          <text x="510" y="285" text-anchor="middle" font-size="11" fill="#A64B2A" opacity="0.85">every instance subscribes</text>
+
+          <path d="M586 258 L644 234" stroke="currentColor" stroke-width="1.4" marker-end="url(#s1)"></path>
+          <path d="M586 282 L644 308" stroke="currentColor" stroke-width="1.4" marker-end="url(#s1)"></path>
+          <rect x="648" y="210" width="196" height="46" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="746" y="238" text-anchor="middle" font-size="12" fill="currentColor">A delivers to its own users</text>
+          <rect x="648" y="286" width="196" height="46" rx="8" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+          <text x="746" y="314" text-anchor="middle" font-size="12" fill="currentColor">B delivers to its own users</text>
+
+          <text x="18" y="368" font-size="12.5" fill="currentColor" opacity="0.7">Each instance still holds only its own connections. It simply stops being the only one that knows the event happened.</text>
+          <text x="18" y="392" font-size="12.5" fill="currentColor" opacity="0.7">The alert is still written to the database first, so nothing is lost even if the channel drops a message.</text>
+        </svg>
+        <figcaption><b>The failure has no error message, which is exactly what makes it dangerous.</b> Two instances would report themselves healthy while quietly halving alert delivery. Removing this is what unlocks redundancy, zero-downtime deploys and every other move on this page.</figcaption>
+      </figure>
+
+      <p>The second half of this wall is that a live connection only ever reaches an app that is <em>open</em>. At a million users the answer is native push — Firebase for Android, Apple's service for iOS — with the live connection kept as the instant path for people who happen to be looking. Both read the same stored alert, so there is one source of truth and two delivery routes.</p>
+
+      <p>The third half, which is really a throughput point: fanning out a wish match to everyone nearby currently happens inside the giver's own "list it" request. At scale that belongs on a worker, so the giver's screen returns in a moment and the alerts follow a second later.</p>
+    </section>
+
+    <section id="geo-fix">
+      <p class="kicker">15</p>
+      <h2>Wall three · finding what is near you</h2>
+      <p>The feed asks one question: which live items sit inside this small box of latitude and longitude? Today there are indexes on expiry, on owner and on claimer — and <strong>none on location</strong>. With a few hundred items that is invisible. With twelve million rows it is a scan of the whole country on every feed load.</p>
+
+      <figure>
+        <svg viewBox="0 0 860 268" role="img" aria-label="Without a spatial index the database examines every live row to answer a nearby query; with one it descends directly to the handful of rows in that area, and the work stays flat as the country fills up.">
+          <text x="18" y="24" font-family="DM Mono, monospace" font-size="11" fill="#A64B2A" letter-spacing="1.3">NO LOCATION INDEX</text>
+          <rect x="18" y="38" width="352" height="76" rx="9" fill="none" stroke="#A64B2A" stroke-width="1.5"></rect>
+          <text x="36" y="63" font-size="12.5" fill="#A64B2A">read every live row in the country…</text>
+          <text x="36" y="84" font-size="12.5" fill="#A64B2A">…test each one against the box…</text>
+          <text x="36" y="105" font-size="12.5" fill="#A64B2A">…return the 24 that matched</text>
+          <text x="392" y="70" font-size="12.5" fill="#A64B2A">the work grows with</text>
+          <text x="392" y="89" font-size="12.5" fill="#A64B2A">the whole country</text>
+
+          <line x1="18" y1="140" x2="842" y2="140" stroke="currentColor" stroke-opacity="0.15"></line>
+
+          <text x="18" y="172" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.55" letter-spacing="1.3">WITH A GEOSPATIAL INDEX</text>
+          <rect x="18" y="186" width="352" height="56" rx="9" fill="none" stroke="currentColor" stroke-width="1.6"></rect>
+          <text x="36" y="211" font-size="12.5" fill="currentColor">descend straight to this patch of map…</text>
+          <text x="36" y="232" font-size="12.5" fill="currentColor">…read the 24 rows that live there</text>
+          <text x="392" y="212" font-size="12.5" fill="currentColor">the work stays flat as</text>
+          <text x="392" y="231" font-size="12.5" fill="currentColor">the country fills up</text>
+
+          <line x1="606" y1="52" x2="606" y2="232" stroke="currentColor" stroke-opacity="0.22"></line>
+          <text x="634" y="60" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.55" letter-spacing="1.2">WHY IT WORKS</text>
+          <text x="634" y="88" font-size="12.5" fill="currentColor">A hyperlocal app never needs</text>
+          <text x="634" y="107" font-size="12.5" fill="currentColor">more than a few dozen rows to</text>
+          <text x="634" y="126" font-size="12.5" fill="currentColor">answer a request. It only has</text>
+          <text x="634" y="145" font-size="12.5" fill="currentColor">to be able to find them without</text>
+          <text x="634" y="164" font-size="12.5" fill="currentColor">reading everything else first.</text>
+          <text x="634" y="196" font-size="12.5" fill="currentColor" opacity="0.65">This is the cheapest fix on the</text>
+          <text x="634" y="215" font-size="12.5" fill="currentColor" opacity="0.65">page and the easiest to forget.</text>
+        </svg>
+        <figcaption><b>One index, and the feed stops caring how big the country gets.</b> PostGIS with a spatial index is the standard answer; a plain composite index on latitude and longitude buys most of the benefit for an afternoon's work today.</figcaption>
+      </figure>
+
+      <p>Two smaller wins sit beside it. Every authenticated request currently spends one database round trip turning a token into a user — holding sessions in a cache removes a query from every single call in the system. And the sweep of lapsed holds runs on read, so the busiest moments do the most extra write work; at scale that belongs on a timer.</p>
+    </section>
+
+    <section id="migrate">
+      <p class="kicker">16</p>
+      <h2>Changing engines mid-flight</h2>
+      <p>The instruction was: do not break things. Every change above can be made with the app running, using the same four steps each time. It is slower than a straight switchover and it is never frightening, because the system works at every step and step three is a flag you can flip back in seconds.</p>
+
+      <figure>
+        <svg viewBox="0 0 860 250" role="img" aria-label="Four-step migration: write to both the old and new paths, backfill history in the background, read from the new path behind a flag, then remove the old path once nothing reads it.">
+          <defs><marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"></path></marker></defs>
+
+          <rect x="16" y="56" width="180" height="90" rx="10" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+          <text x="34" y="82" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.6">STEP 1</text>
+          <text x="34" y="107" font-size="13" fill="currentColor">Write to both</text>
+          <text x="34" y="128" font-size="11.5" fill="currentColor" opacity="0.7">old path still authoritative</text>
+
+          <line x1="196" y1="101" x2="224" y2="101" stroke="currentColor" stroke-width="1.4" marker-end="url(#m1)"></line>
+
+          <rect x="228" y="56" width="180" height="90" rx="10" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+          <text x="246" y="82" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.6">STEP 2</text>
+          <text x="246" y="107" font-size="13" fill="currentColor">Backfill the history</text>
+          <text x="246" y="128" font-size="11.5" fill="currentColor" opacity="0.7">in the background, resumable</text>
+
+          <line x1="408" y1="101" x2="436" y2="101" stroke="currentColor" stroke-width="1.4" marker-end="url(#m1)"></line>
+
+          <rect x="440" y="56" width="180" height="90" rx="10" fill="none" stroke="currentColor" stroke-width="1.8"></rect>
+          <text x="458" y="82" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.6">STEP 3</text>
+          <text x="458" y="107" font-size="13" fill="currentColor">Read from the new</text>
+          <text x="458" y="128" font-size="11.5" fill="currentColor" opacity="0.7">behind a flag you can flip back</text>
+
+          <line x1="620" y1="101" x2="648" y2="101" stroke="currentColor" stroke-width="1.4" marker-end="url(#m1)"></line>
+
+          <rect x="652" y="56" width="190" height="90" rx="10" fill="none" stroke="currentColor" stroke-opacity="0.55" stroke-dasharray="4 4"></rect>
+          <text x="670" y="82" font-family="DM Mono, monospace" font-size="11" fill="currentColor" opacity="0.6">STEP 4</text>
+          <text x="670" y="107" font-size="13" fill="currentColor">Remove the old</text>
+          <text x="670" y="128" font-size="11.5" fill="currentColor" opacity="0.7">only once nothing reads it</text>
+
+          <text x="16" y="192" font-size="12.5" fill="currentColor" opacity="0.7">Add, duplicate, switch, subtract — never replace. At every step the app is serving users normally.</text>
+          <text x="16" y="216" font-size="12.5" fill="currentColor" opacity="0.7">The 78 tests are what make each step something you do on a Tuesday afternoon rather than a Sunday night.</text>
+        </svg>
+        <figcaption><b>The same four steps work for all three walls.</b> For photographs: new uploads go to storage while old ones still read from the database, until a backfill catches up and the column is dropped. For alerts: publish to both the memory map and the shared channel until every instance is subscribed, then delete the map.</figcaption>
+      </figure>
+
+      <div class="note">
+        <span class="note-label">The one rule that keeps it safe</span>
+        <p>Never do two of these at once, and never take a step on a Friday. Each of the three walls is independent — that is a property worth protecting, because it means any single change can be reversed without unpicking the others.</p>
+      </div>
+    </section>
+
+    <section id="budget">
+      <p class="kicker">17</p>
+      <h2>The latency budget</h2>
+      <p>"Fast" only means something as a number per action. These are the targets worth holding at a million users, and what has to be true for each one.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Action</th><th>Target</th><th>What makes it possible</th></tr></thead>
+          <tbody>
+            <tr><td class="plain-first">Feed loads</td><td>under 200 ms</td><td>Location index, session in cache, 24 items a page, photos by reference.</td></tr>
+            <tr><td class="plain-first">First cards visible</td><td>under 1 s on 4G</td><td>Skeletons drawn immediately, images streaming from a nearby edge.</td></tr>
+            <tr><td class="plain-first">Claim confirmed</td><td>under 300 ms</td><td>One short locked transaction. Cannot be cached, so it must stay small.</td></tr>
+            <tr><td class="plain-first">Photograph appears</td><td>under 100 ms</td><td>Served from the CDN edge. It never reaches the API twice.</td></tr>
+            <tr><td class="plain-first">Listing goes live</td><td>under 400 ms</td><td>AI checks moved off the request — the listing appears, the checks follow.</td></tr>
+            <tr><td class="plain-first">Alert reaches a phone</td><td>under 5 s</td><td>Fan-out on a worker rather than in the giver's request; push for closed apps.</td></tr>
+            <tr><td class="plain-first">Message delivered</td><td>under 1 s</td><td>Shared channel, so it does not matter which instance either person is on.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note">
+        <span class="note-label">The rule behind the whole table</span>
+        <p>Anything a person is waiting on stays inside the request. Everything else — wish fan-out to thousands of neighbours, AI moderation, digests, sweeps, impact figures — moves to a worker. Today a giver's "list it" request personally waits for the matcher to consider every wish nearby; that is the first thing to move, and it is what keeps the numbers above true as the neighbourhood grows.</p>
+      </div>
+    </section>
+
+    <section id="order">
+      <p class="kicker">18</p>
+      <h2>The order to do it in</h2>
+      <p>Not all at once, and nothing before it is needed. Each step has a trigger — build it when the trigger fires, not sooner. Everything above the line is worth doing before launch; everything below waits for a number.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Do this</th><th>Trigger</th><th>Effort</th></tr></thead>
+          <tbody>
+            <tr><td class="plain-first">Index location</td><td>Now — it is an afternoon, and it is silent until it isn't</td><td>Hours</td></tr>
+            <tr><td class="plain-first">Scheduled backups and one tested restore</td><td>Before the first real user</td><td>Half a day</td></tr>
+            <tr><td class="plain-first">Photographs into object storage</td><td>Before real users list at any volume</td><td>1–2 days</td></tr>
+            <tr><td class="plain-first">Native push notifications</td><td>Before launch — the product promise depends on it</td><td>3–5 days</td></tr>
+            <tr><td class="plain-first">Alerts through a shared channel</td><td>Before the second server instance, whenever that comes</td><td>1–2 days</td></tr>
+            <tr><td class="plain-first">Sessions in a cache</td><td>~50k daily actives</td><td>Half a day</td></tr>
+            <tr><td class="plain-first">Queue and workers</td><td>~50k daily actives, or when listing starts to feel slow</td><td>2–3 days</td></tr>
+            <tr><td class="plain-first">Several API instances</td><td>Once alerts are shared — then it is a configuration change</td><td>Hours</td></tr>
+            <tr><td class="plain-first">Read replicas</td><td>When feed reads start crowding out writes</td><td>1 day</td></tr>
+            <tr><td class="plain-first">Archive expired items</td><td>~10M rows, or when backups get slow</td><td>1–2 days</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note">
+        <span class="note-label">If only three things get done</span>
+        <p><strong>Index location</strong> — an afternoon, and it removes the wall you cannot see coming. <strong>Photographs out of the database</strong> — the wall you hit first, and far cheaper to move before there is real data than after. <strong>Alerts through a shared channel</strong> — the wall that silently pins the entire system to one machine, and therefore the one that unlocks everything else.</p>
+        <p>The rest can wait for its trigger. A million users is 140 requests a second; the architecture on this page is comfortable well past that, and almost none of it needs building today.</p>
+      </div>
+    </section>
   </main>
 
   <footer>
-    Doorstep · TwelveTech Systems Limited. Describes the codebase as it stands — 25 tables, 69 routes, 78 tests passing.
+    Doorstep · TwelveTech Systems Limited. Describes the codebase as it stands — 25 tables, 69 routes, 78 tests passing — and the road from here to a million.
   </footer>
 
 </div>
