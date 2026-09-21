@@ -382,6 +382,9 @@ The iOS project Capacitor generated did not build on a Mac as-is. Five changes w
 | Thing | Value |
 | --- | --- |
 | Bundle identifier | `uk.co.doorstep.app` |
+| Apple ID (numeric, = `APP_STORE_APP_ID`) | `6814433152` |
+| Apple Team ID (= `DEVELOPMENT_TEAM`) | `LLKU246YAG` |
+| SKU | `doorstep-ios-001` |
 | App name (on the phone) | Doorstep |
 | App name (App Store listing) | Doorstep Giveaways |
 | Company | TwelveTech Systems Limited |
