@@ -183,6 +183,43 @@ workflows:
       node: 22
       xcode: latest
     scripts:
+      - name: Check the Apple credentials arrived
+        script: |
+          # This runs first and on purpose. Without it, a missing variable
+          # surfaces much later as "App requires a provisioning profile",
+          # which points at Xcode and sends you hunting through the Apple
+          # developer portal for a problem that is actually in this project's
+          # environment variables.
+          #
+          # Values are never printed - only the names of the ones missing.
+          missing=""
+          for v in APP_STORE_CONNECT_ISSUER_ID \
+                   APP_STORE_CONNECT_KEY_IDENTIFIER \
+                   APP_STORE_CONNECT_PRIVATE_KEY \
+                   CERTIFICATE_PRIVATE_KEY \
+                   APP_STORE_APP_ID; do
+            eval "value=\${$v:-}"
+            if [ -z "$value" ]; then
+              missing="$missing $v"
+            else
+              echo "ok: $v is set"
+            fi
+          done
+
+          if [ -n "$missing" ]; then
+            echo ""
+            echo "=================================================================="
+            echo " These environment variables are missing or empty:"
+            for v in $missing; do echo "   - $v"; done
+            echo ""
+            echo " Fix in Codemagic: your app -> Environment variables."
+            echo " Each one needs Group set to EXACTLY: appstore_credentials"
+            echo " A variable outside that group is invisible to this workflow,"
+            echo " even though it shows in the variables list."
+            echo "=================================================================="
+            exit 1
+          fi
+
       - name: Install npm dependencies
         script: |
           npm ci
