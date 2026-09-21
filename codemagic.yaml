@@ -239,9 +239,34 @@ workflows:
           # --- read back what actually landed, and show it in the log --------
           # If signing goes wrong again, this is the evidence: it prints the
           # real profile name and the signing settings xcodebuild will use.
-          PROFILE_FILE=$(ls -t "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision | head -1)
-          security cms -D -i "$PROFILE_FILE" > /tmp/profile.plist
-          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" /tmp/profile.plist)
+          # Pick the DISTRIBUTION profile for this bundle id - never simply
+          # the newest file. A development profile lists the specific devices
+          # it may install on; a distribution profile has no such list. That
+          # is the reliable way to tell them apart, and it stops a stray
+          # development profile from being grabbed by mistake.
+          PROFILE_NAME=""
+          for f in "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision; do
+            [ -e "$f" ] || continue
+            security cms -D -i "$f" > /tmp/profile.plist 2>/dev/null || continue
+            if /usr/libexec/PlistBuddy -c "Print :ProvisionedDevices" /tmp/profile.plist >/dev/null 2>&1; then
+              echo "skipping development profile: $f"
+              continue
+            fi
+            APP_ID=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" /tmp/profile.plist 2>/dev/null || echo "")
+            case "$APP_ID" in
+              *"$BUNDLE_ID")
+                PROFILE_FILE="$f"
+                PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" /tmp/profile.plist)
+                ;;
+            esac
+          done
+
+          if [ -z "$PROFILE_NAME" ]; then
+            echo "No App Store provisioning profile found for $BUNDLE_ID."
+            echo "Profiles that were available:"
+            ls -la "$HOME/Library/MobileDevice/Provisioning Profiles/" || true
+            exit 1
+          fi
           echo "--- provisioning profile in use ---"
           echo "file: $PROFILE_FILE"
           echo "name: $PROFILE_NAME"
