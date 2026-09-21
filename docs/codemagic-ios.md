@@ -200,7 +200,7 @@ This matches the Android `applicationId` exactly, which is what you want. It can
 2. Press **+**, then **New App**.
 3. Fill in:
    - **Platforms**: iOS
-   - **Name**: `Doorstep` — this is the public App Store name and must be unique across the whole store. If it is taken, you will need a variation such as `Doorstep: Neighbour Giveaways`. The name shown under the icon on the phone comes from the project, not from here.
+   - **Name**: `Doorstep Giveaways` — this is the public App Store name. Plain `Doorstep` was already registered by another developer: App Store names are unique across the whole store, exactly as Play Store package names are. This field does **not** change the name under the icon on the phone, which comes from `CFBundleDisplayName` in the project and stays `Doorstep`.
    - **Primary Language**: English (U.K.)
    - **Bundle ID**: pick `uk.co.doorstep.app` from the dropdown. If it is not there, the identifier registration above did not complete.
    - **SKU**: an internal reference only, never shown to anyone. `doorstep-ios` is fine.
@@ -382,7 +382,8 @@ The iOS project Capacitor generated did not build on a Mac as-is. Five changes w
 | Thing | Value |
 | --- | --- |
 | Bundle identifier | `uk.co.doorstep.app` |
-| App name | Doorstep |
+| App name (on the phone) | Doorstep |
+| App name (App Store listing) | Doorstep Giveaways |
 | Company | TwelveTech Systems Limited |
 | Contact email | syedmuhammadr517@gmail.com |
 | Current version / build | `1.2` / `4` |
