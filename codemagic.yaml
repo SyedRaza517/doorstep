@@ -170,12 +170,14 @@ workflows:
         # Pulls in APP_STORE_CONNECT_*, CERTIFICATE_PRIVATE_KEY and
         # APP_STORE_APP_ID. The group name must be exactly this.
         - appstore_credentials
-      # Tells Codemagic to fetch (or create) a distribution certificate and a
-      # provisioning profile for this bundle id before the build starts, so
-      # you never have to touch Keychain or the Apple developer portal by hand.
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: uk.co.doorstep.app
+      vars:
+        # Used by the signing step below. Must match PRODUCT_BUNDLE_IDENTIFIER
+        # in the Xcode project and the App ID registered with Apple.
+        BUNDLE_ID: "uk.co.doorstep.app"
+      # NOTE: there is deliberately no `ios_signing:` block here. That block
+      # only FETCHES signing files that already exist, and fails with
+      # "No matching profiles found" on an account that has never built this
+      # app before. The scripted step below creates them instead.
       # Node 22+: required by the Capacitor 8 CLI (see ios-unsigned above).
       node: 22
       xcode: latest
@@ -212,10 +214,26 @@ workflows:
           cd ios/App
           agvtool new-version -all $((LATEST_BUILD_NUMBER + 1))
 
-      - name: Apply the provisioning profiles Codemagic fetched
+      - name: Set up code signing
         script: |
-          # Writes the downloaded profiles and team id into the Xcode project
-          # so the build signs correctly without any manual Xcode setup.
+          # A fresh Apple account has no distribution certificate and no
+          # provisioning profile - those are normally made by hand in Xcode on
+          # a Mac. `--create` tells Codemagic to make whatever is missing,
+          # which is why this works on a machine that has never seen the app.
+          #
+          # `keychain initialize` makes a throwaway keychain on the build VM to
+          # hold the certificate; the VM is destroyed afterwards.
+          keychain initialize
+
+          # Fetches the App Store distribution certificate and profile for this
+          # bundle id, creating either one if Apple does not have it yet.
+          app-store-connect fetch-signing-files "$BUNDLE_ID"             --type IOS_APP_STORE             --create
+
+          # Loads the certificate into the keychain xcodebuild will read.
+          keychain add-certificates
+
+          # Writes the profile and team id into the Xcode project so the build
+          # signs without any manual Xcode setup.
           xcode-project use-profiles
 
       - name: Build signed .ipa
