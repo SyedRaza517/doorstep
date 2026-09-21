@@ -21,27 +21,26 @@
 #       Google Play. Requires you to create a signing keystore yourself.
 #
 #  WHAT MUST BE CONFIGURED BEFORE `ios-release` WILL WORK
-#  In the Codemagic UI, open your app -> Environment variables, and create a
-#  GROUP called exactly `appstore_credentials` containing:
-#    - APP_STORE_CONNECT_ISSUER_ID       (App Store Connect -> Users and Access
-#                                         -> Integrations -> Keys; the Issuer ID)
-#    - APP_STORE_CONNECT_KEY_IDENTIFIER  (the Key ID of that API key)
-#    - APP_STORE_CONNECT_PRIVATE_KEY     (the whole .p8 file contents, marked
-#                                         "Secure")
-#    - CERTIFICATE_PRIVATE_KEY           (an RSA private key Codemagic uses to
-#                                         create/fetch your iOS distribution
-#                                         certificate; marked "Secure")
-#    - APP_STORE_APP_ID                  (the numeric Apple ID of the app in
-#                                         App Store Connect, e.g. 6501234567;
-#                                         used only to read the last TestFlight
-#                                         build number)
-#  Those five variables are the ONLY Codemagic setup needed - there is no
-#  separate "integration" to register. You must still create the app record
-#  for `uk.co.doorstep.app` in App Store Connect once by hand, otherwise
-#  there is nothing for TestFlight to accept the upload into.
+#  Almost nothing, because the App Store Connect API key already exists in
+#  this Codemagic team as the integration named `Codemagic-Admin` - the same
+#  one ClassAura builds with. An App Store Connect key is account-wide, not
+#  per-app, so one key covers every app in the Apple account.
 #
-#  The API key must have the App Manager role. A Developer-role key can read
-#  signing files but cannot create them, and the build fails at signing.
+#  There are NO environment variables to set for iOS. Signing is handled by
+#  the `ios_signing:` block, which is Codemagic-managed: it generates the
+#  certificate keypair, keeps the private key with the team, and installs
+#  both certificate and profile into the build keychain before any script
+#  runs. See the long comment on that block for why the scripted alternative,
+#  `fetch-signing-files --create`, cannot work at all.
+#
+#  What you DO need, once, by hand:
+#    - the App ID `uk.co.doorstep.app` registered in the Apple developer portal
+#    - the app record created in App Store Connect, which yields the numeric
+#      Apple ID set as APP_STORE_APPLE_ID below
+#  Both are done for Doorstep.
+#
+#  The API key behind the integration must have the App Manager role. A
+#  Developer-role key can read signing assets but cannot create them.
 #
 #  IMPORTANT: THIS IOS PROJECT USES SWIFT PACKAGE MANAGER, NOT COCOAPODS
 #  Capacitor 8 generates a local Swift package at ios/App/CapApp-SPM. There is
@@ -140,17 +139,16 @@ workflows:
 
   # ===========================================================================
   # 2. ios-release - signed build, uploaded to TestFlight
-  #    This WILL FAIL until the `appstore_credentials` group exists (see the
-  #    header of this file for the exact variable names).
+  #    Signing is Codemagic-managed via the `Codemagic-Admin` integration.
+  #    There is nothing to set up in the UI for this workflow.
   # ===========================================================================
   ios-release:
     name: iOS - signed release to TestFlight
     max_build_duration: 60
     instance_type: mac_mini_m2
     # --- Automatic triggering is intentionally DISABLED ---------------------
-    # Uncomment the block below only when you are happy for EVERY push to
-    # `main` to consume build minutes and push a new build to TestFlight.
-    # Until then, start this workflow by hand from the Codemagic UI.
+    # Uncomment only when you are happy for EVERY push to main to consume
+    # build minutes and send a new build to TestFlight.
     #
     # triggering:
     #   events:
@@ -159,195 +157,117 @@ workflows:
     #     - pattern: main
     #       include: true
     #       source: true
-    #   # If you push twice in a minute, kill the older build rather than
-    #   # running both and wasting minutes.
     #   cancel_previous_builds: true
     # ------------------------------------------------------------------------
+    integrations:
+      # The App Store Connect API key registered under Codemagic -> Teams ->
+      # Integrations. This is the same key ClassAura builds with: an App Store
+      # Connect key is account-wide, not per-app, so one key covers every app
+      # in the Apple account. The name must match the label in that UI exactly.
+      app_store_connect: Codemagic-Admin
     environment:
-      groups:
-        # Pulls in APP_STORE_CONNECT_*, CERTIFICATE_PRIVATE_KEY and
-        # APP_STORE_APP_ID. The group name must be exactly this.
-        - appstore_credentials
+      # Codemagic-managed signing. This deliberately replaces a hand-rolled
+      # `app-store-connect fetch-signing-files --create`, which cannot work:
+      #
+      #   Cannot save Signing Certificates without certificate private key
+      #   Did not find matching provisioning profiles for code signing!
+      #    - Provisioning Profiles: []
+      #
+      # Apple never releases a certificate's private key - it only ever exists
+      # on the machine that generated the signing request. So the CLI could
+      # create a certificate at Apple, but had no key to pair it with,
+      # discarded it, and then had nothing to match a profile against. Every
+      # downstream value came out blank and the archive failed with the
+      # misleading "App requires a provisioning profile".
+      #
+      # With this block Codemagic generates the keypair itself, keeps it with
+      # the team, and installs the certificate and profile into the build
+      # keychain before any script runs - so the private key survives between
+      # builds and no new certificate is burned each time (Apple caps
+      # distribution certificates at three).
+      ios_signing:
+        distribution_type: app_store
+        # Must equal PRODUCT_BUNDLE_IDENTIFIER in the Xcode project and the App
+        # ID registered with Apple. Codemagic resolves this before any script
+        # runs, to fetch the signing assets, so it cannot be derived at runtime.
+        bundle_identifier: uk.co.doorstep.app
       vars:
-        # Used by the signing step below. Must match PRODUCT_BUNDLE_IDENTIFIER
-        # in the Xcode project and the App ID registered with Apple.
+        XCODE_SCHEME: "App"
         BUNDLE_ID: "uk.co.doorstep.app"
-        # Apple Developer Team ID, from the App ID page in the developer
-        # portal. Not a secret - it ships inside every signed binary.
-        TEAM_ID: "LLKU246YAG"
-      # NOTE: there is deliberately no `ios_signing:` block here. That block
-      # only FETCHES signing files that already exist, and fails with
-      # "No matching profiles found" on an account that has never built this
-      # app before. The scripted step below creates them instead.
-      # Node 22+: required by the Capacitor 8 CLI (see ios-unsigned above).
+        # Numeric Apple ID of the app record in App Store Connect. It is both
+        # the upload target AND what the build-number step reads to find the
+        # latest TestFlight build, so a wrong value uploads to another listing
+        # and numbers the build from that listing's history.
+        APP_STORE_APPLE_ID: 6814433152
       node: 22
       xcode: latest
     scripts:
-      - name: Check the Apple credentials arrived
-        script: |
-          # This runs first and on purpose. Without it, a missing variable
-          # surfaces much later as "App requires a provisioning profile",
-          # which points at Xcode and sends you hunting through the Apple
-          # developer portal for a problem that is actually in this project's
-          # environment variables.
-          #
-          # Values are never printed - only the names of the ones missing.
-          missing=""
-          for v in APP_STORE_CONNECT_ISSUER_ID \
-                   APP_STORE_CONNECT_KEY_IDENTIFIER \
-                   APP_STORE_CONNECT_PRIVATE_KEY \
-                   CERTIFICATE_PRIVATE_KEY \
-                   APP_STORE_APP_ID; do
-            eval "value=\${$v:-}"
-            if [ -z "$value" ]; then
-              missing="$missing $v"
-            else
-              echo "ok: $v is set"
-            fi
-          done
-
-          if [ -n "$missing" ]; then
-            echo ""
-            echo "=================================================================="
-            echo " These environment variables are missing or empty:"
-            for v in $missing; do echo "   - $v"; done
-            echo ""
-            echo " Fix in Codemagic: your app -> Environment variables."
-            echo " Each one needs Group set to EXACTLY: appstore_credentials"
-            echo " A variable outside that group is invisible to this workflow,"
-            echo " even though it shows in the variables list."
-            echo "=================================================================="
-            exit 1
-          fi
-
       - name: Install npm dependencies
-        script: |
-          npm ci
+        script: npm ci
 
       - name: Build the web app with Vite
         script: |
+          # Produces ./dist, which capacitor.config.json declares as webDir.
+          # Unlike ClassAura, .env.production IS committed in this repo, so
+          # VITE_API_URL reaches the build without being set here. Setting it
+          # in both places would just create somewhere for them to disagree.
           npm run build
 
       - name: Copy web assets into the iOS project
         script: |
-          # Same reason as in ios-unsigned: the web bundle is not in git.
+          # The web bundle is gitignored (ios/.gitignore excludes App/App/public),
+          # so without this the app ships empty and opens to a white screen.
           npx cap sync ios
 
-      - name: Set the build number from TestFlight
-        script: |
-          # Apple rejects an upload whose build number it has seen before, so
-          # ask TestFlight for the highest existing build number and go one
-          # higher. The `|| true` plus the `-z` check covers the very first
-          # upload, when TestFlight has no builds yet and the command fails.
-          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APP_ID" 2>/dev/null) || true
-          if [ -z "$LATEST_BUILD_NUMBER" ]; then
-            # Nothing on TestFlight yet: fall back to the value already in the
-            # Xcode project (CURRENT_PROJECT_VERSION is currently 4).
-            LATEST_BUILD_NUMBER=4
-          fi
-          # agvtool must run from the folder containing the .xcodeproj.
-          # `new-version -all` writes CURRENT_PROJECT_VERSION into all targets.
-          # MARKETING_VERSION (1.2) is left alone - bump that by hand in Xcode
-          # when you want a new user-visible version number.
-          cd ios/App
-          agvtool new-version -all $((LATEST_BUILD_NUMBER + 1))
-
-      - name: Set up code signing and build the signed .ipa
+      - name: Apply the signing profile to the Xcode project
         script: |
           set -e
+          # Codemagic has already installed the certificate and profile into the
+          # build keychain (see ios_signing above). This writes the profile into
+          # the project so the archive can find it. --project is explicit so it
+          # cannot search the wrong place and patch nothing.
+          xcode-project use-profiles --project "ios/App/App.xcodeproj" --verbose
 
-          # These are one step on purpose. The profile name is read back from
-          # disk below and handed straight to xcodebuild; splitting them would
-          # lose that shell variable between steps.
+          echo "=== signing settings written into the project ==="
+          grep -oE "(DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY) = [^;]*" ios/App/App.xcodeproj/project.pbxproj | sort -u
 
-          # A throwaway keychain on the build VM to hold the certificate.
-          keychain initialize
-
-          # Fetch the App Store distribution certificate and profile for this
-          # bundle id, creating either if Apple does not have it yet.
-          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
-
-          # Load the certificate into the keychain xcodebuild reads.
-          keychain add-certificates
-
-          # Patch the Xcode project with the profile.
-          xcode-project use-profiles --project "ios/App/App.xcodeproj"
-
-          # --- read back what actually landed, and show it in the log --------
-          # If signing goes wrong again, this is the evidence: it prints the
-          # real profile name and the signing settings xcodebuild will use.
-          # Pick the DISTRIBUTION profile for this bundle id - never simply
-          # the newest file. A development profile lists the specific devices
-          # it may install on; a distribution profile has no such list. That
-          # is the reliable way to tell them apart, and it stops a stray
-          # development profile from being grabbed by mistake.
-          PROFILE_NAME=""
-          for f in "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision; do
-            [ -e "$f" ] || continue
-            security cms -D -i "$f" > /tmp/profile.plist 2>/dev/null || continue
-            if /usr/libexec/PlistBuddy -c "Print :ProvisionedDevices" /tmp/profile.plist >/dev/null 2>&1; then
-              echo "skipping development profile: $f"
-              continue
-            fi
-            APP_ID=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" /tmp/profile.plist 2>/dev/null || echo "")
-            case "$APP_ID" in
-              *"$BUNDLE_ID")
-                PROFILE_FILE="$f"
-                PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" /tmp/profile.plist)
-                ;;
-            esac
-          done
-
-          if [ -z "$PROFILE_NAME" ]; then
-            echo "No App Store provisioning profile found for $BUNDLE_ID."
-            echo "Profiles that were available:"
-            ls -la "$HOME/Library/MobileDevice/Provisioning Profiles/" || true
+          # Stop here with the reason rather than later with a generic exit 65.
+          if ! grep -q "PROVISIONING_PROFILE_SPECIFIER" ios/App/App.xcodeproj/project.pbxproj; then
+            echo ""
+            echo "FATAL: no provisioning profile was written into the Xcode project."
+            echo "Codemagic did not install one. Check that the App Store Connect"
+            echo "integration 'Codemagic-Admin' is attached to this workflow and that"
+            echo "the bundle id $BUNDLE_ID is registered in the Apple Developer portal."
             exit 1
           fi
-          echo "--- provisioning profile in use ---"
-          echo "file: $PROFILE_FILE"
-          echo "name: $PROFILE_NAME"
-          echo "team: $TEAM_ID"
-          echo "-----------------------------------"
 
-          # --- build --------------------------------------------------------
-          # `use-profiles` patches the project, but the archive is run with
-          # CODE_SIGN_STYLE=Manual, and manual signing needs the team, the
-          # identity AND the profile named on the command line. Relying on the
-          # patch alone fails with:
-          #   "App" requires a provisioning profile.
-          # So they are passed explicitly here. --project, not --workspace,
-          # because this app uses Swift Package Manager and has no workspace.
-          xcode-project build-ipa \
-            --project "ios/App/App.xcodeproj" \
-            --scheme "App" \
-            --archive-xcargs "CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=$TEAM_ID CODE_SIGN_IDENTITY=\"Apple Distribution\" PROVISIONING_PROFILE_SPECIFIER=\"$PROFILE_NAME\""
+      - name: Set build number from latest TestFlight
+        script: |
+          cd ios/App
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" || echo 0)
+          agvtool new-version -all $(($LATEST + 1))
+
+      - name: Build .ipa
+        script: |
+          # --project, NOT --workspace: this app uses Swift Package Manager and
+          # has no .xcworkspace. Passing --workspace is the commonest way this
+          # build breaks.
+          cd ios/App
+          xcode-project build-ipa --project "App.xcodeproj" --scheme "$XCODE_SCHEME"
     artifacts:
-      # The installable, signed app.
-      - build/ios/ipa/*.ipa
-      # Raw xcodebuild logs, for diagnosing a failed compile or signing error.
+      # Note the ios/App prefix: build-ipa runs after `cd ios/App`, so its
+      # output lands there rather than at the repository root.
+      - ios/App/build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
-      # Debug symbols - needed later to turn crash reports into readable
-      # stack traces.
-      - build/ios/xcarchive/*.dSYM
-      - /tmp/xcodebuild_logs/*.dSYM
+      - ios/App/build/ios/xcarchive/*.dSYM
     publishing:
       app_store_connect:
-        # Authenticate straight from the variables in `appstore_credentials`.
-        # There is deliberately no `auth: integration` here: that form needs a
-        # named App Store Connect integration registered separately under
-        # Teams -> Integrations, and fails the whole build with
-        # 'App Store Connect integration "..." does not exist' when it is
-        # missing. These three variables are the same key, and the signing
-        # step above already relies on them, so there is one thing to set up
-        # rather than two.
-        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
-        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
-        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
-        # Upload to TestFlight so you and your testers can install it.
+        # Reuse the API key from the integration above.
+        auth: integration
+        # Land in TestFlight for internal testers.
         submit_to_testflight: true
-        # Left off on purpose: turning this on would start public App Store
-        # review automatically on every single build.
+        # Left off deliberately: turning this on starts public App Store review
+        # automatically on every build.
         submit_to_app_store: false
       email:
         recipients:
