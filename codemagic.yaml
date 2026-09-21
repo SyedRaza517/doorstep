@@ -230,9 +230,10 @@ workflows:
           # Loads the certificate into the keychain xcodebuild will read.
           keychain add-certificates
 
-          # Writes the profile and team id into the Xcode project so the build
-          # signs without any manual Xcode setup.
-          xcode-project use-profiles
+          # Writes the profile into the Xcode project so the build signs
+          # without any manual Xcode setup. --project is explicit so it cannot
+          # patch the wrong thing or silently patch nothing.
+          xcode-project use-profiles --project "ios/App/App.xcodeproj"
 
       - name: Build signed .ipa
         script: |
