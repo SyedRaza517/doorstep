@@ -69,8 +69,11 @@ workflows:
     # Apple Silicon macOS VM. iOS code can only be compiled on macOS.
     instance_type: mac_mini_m2
     environment:
-      # package.json declares "engines": { "node": ">=20 <23" }.
-      node: 20
+      # Capacitor 8's CLI declares engines: { node: ">=22.0.0" } and refuses to
+      # run on anything older - `npx cap sync` aborts with "The Capacitor CLI
+      # requires NodeJS >=22.0.0". npm and Vite run fine on 20, so that failure
+      # lands on the cap sync step rather than at install time.
+      node: 22
       # "latest" = newest stable Xcode available on the Codemagic image.
       xcode: latest
     scripts:
@@ -173,7 +176,8 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: uk.co.doorstep.app
-      node: 20
+      # Node 22+: required by the Capacitor 8 CLI (see ios-unsigned above).
+      node: 22
       xcode: latest
     scripts:
       - name: Install npm dependencies
@@ -269,7 +273,8 @@ workflows:
         # *.jks): anyone holding it can publish updates as you, and losing it
         # means you can never update the Play Store listing again.
         - keystore_credentials
-      node: 20
+      # Node 22+: required by the Capacitor 8 CLI (see ios-unsigned above).
+      node: 22
       # Capacitor 8's Android Gradle Plugin requires JDK 21.
       java: 21
     scripts:
