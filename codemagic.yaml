@@ -35,10 +35,13 @@
 #                                         App Store Connect, e.g. 6501234567;
 #                                         used only to read the last TestFlight
 #                                         build number)
-#  You must also register the App Store Connect API key under
-#  Teams -> Integrations -> Developer Portal, and create the app record for
-#  `uk.co.doorstep.app` in App Store Connect once by hand - otherwise there is
-#  nothing for TestFlight to accept the upload into.
+#  Those five variables are the ONLY Codemagic setup needed - there is no
+#  separate "integration" to register. You must still create the app record
+#  for `uk.co.doorstep.app` in App Store Connect once by hand, otherwise
+#  there is nothing for TestFlight to accept the upload into.
+#
+#  The API key must have the App Manager role. A Developer-role key can read
+#  signing files but cannot create them, and the build fails at signing.
 #
 #  IMPORTANT: THIS IOS PROJECT USES SWIFT PACKAGE MANAGER, NOT COCOAPODS
 #  Capacitor 8 generates a local Swift package at ios/App/CapApp-SPM. There is
@@ -160,11 +163,6 @@ workflows:
     #   # running both and wasting minutes.
     #   cancel_previous_builds: true
     # ------------------------------------------------------------------------
-    integrations:
-      # Connects the App Store Connect API key you registered in the Codemagic
-      # UI under Teams -> Integrations -> Developer Portal. The value on the
-      # right must match the name you gave that integration there.
-      app_store_connect: codemagic_app_store_connect
     environment:
       groups:
         # Pulls in APP_STORE_CONNECT_*, CERTIFICATE_PRIVATE_KEY and
@@ -255,9 +253,17 @@ workflows:
       - /tmp/xcodebuild_logs/*.dSYM
     publishing:
       app_store_connect:
-        # Reuse the API key from the `integrations` block above rather than
-        # repeating the key details here.
-        auth: integration
+        # Authenticate straight from the variables in `appstore_credentials`.
+        # There is deliberately no `auth: integration` here: that form needs a
+        # named App Store Connect integration registered separately under
+        # Teams -> Integrations, and fails the whole build with
+        # 'App Store Connect integration "..." does not exist' when it is
+        # missing. These three variables are the same key, and the signing
+        # step above already relies on them, so there is one thing to set up
+        # rather than two.
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
         # Upload to TestFlight so you and your testers can install it.
         submit_to_testflight: true
         # Left off on purpose: turning this on would start public App Store
