@@ -22,8 +22,16 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Doorstep uses your camera so you can take a photo of the item you are giving away, so your neighbours can see what it is before they come for it.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Doorstep uses your location to show you the free items closest to you, and to work out how far away each one is.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Doorstep opens your photo library so you can choose a picture you have already taken of the item you are giving away.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -49,7 +57,7 @@
 	<string>Main</string>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
+		<string>arm64</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>

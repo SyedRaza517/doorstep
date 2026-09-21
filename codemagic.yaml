@@ -1,0 +1,321 @@
+# =============================================================================
+#  Codemagic CI/CD configuration for Doorstep (React + Vite + Capacitor 8)
+# =============================================================================
+#
+#  WHAT THIS FILE IS
+#  Codemagic reads this file from the repo root and shows one entry per
+#  "workflow" below. You pick a workflow in the Codemagic UI and press
+#  "Start new build". Nothing here runs automatically unless a `triggering:`
+#  block says so - and deliberately, none of them do (see ios-release).
+#
+#  WHICH WORKFLOW TO RUN FIRST
+#    1. `ios-unsigned`  <- START HERE. Needs ZERO credentials. No Apple
+#       Developer account, no certificates, no API keys. It proves the whole
+#       pipeline (npm install -> Vite build -> Capacitor sync -> Xcode compile)
+#       works. The output is an unsigned .app that cannot be installed on a
+#       real device, but a green build means everything except signing is fine.
+#    2. `ios-release`   <- Run this only AFTER you have a paid Apple Developer
+#       account and have configured the credentials listed below. It produces
+#       a signed .ipa and uploads it to TestFlight.
+#    3. `android-release` <- Optional. Only needed when you want to ship to
+#       Google Play. Requires you to create a signing keystore yourself.
+#
+#  WHAT MUST BE CONFIGURED BEFORE `ios-release` WILL WORK
+#  In the Codemagic UI, open your app -> Environment variables, and create a
+#  GROUP called exactly `appstore_credentials` containing:
+#    - APP_STORE_CONNECT_ISSUER_ID       (App Store Connect -> Users and Access
+#                                         -> Integrations -> Keys; the Issuer ID)
+#    - APP_STORE_CONNECT_KEY_IDENTIFIER  (the Key ID of that API key)
+#    - APP_STORE_CONNECT_PRIVATE_KEY     (the whole .p8 file contents, marked
+#                                         "Secure")
+#    - CERTIFICATE_PRIVATE_KEY           (an RSA private key Codemagic uses to
+#                                         create/fetch your iOS distribution
+#                                         certificate; marked "Secure")
+#    - APP_STORE_APP_ID                  (the numeric Apple ID of the app in
+#                                         App Store Connect, e.g. 6501234567;
+#                                         used only to read the last TestFlight
+#                                         build number)
+#  You must also register the App Store Connect API key under
+#  Teams -> Integrations -> Developer Portal, and create the app record for
+#  `uk.co.doorstep.app` in App Store Connect once by hand - otherwise there is
+#  nothing for TestFlight to accept the upload into.
+#
+#  IMPORTANT: THIS IOS PROJECT USES SWIFT PACKAGE MANAGER, NOT COCOAPODS
+#  Capacitor 8 generates a local Swift package at ios/App/CapApp-SPM. There is
+#  NO Podfile and NO App.xcworkspace in this repo. Every iOS build below
+#  therefore targets the *project* (`ios/App/App.xcodeproj`), never a
+#  workspace, and there is deliberately no `cocoapods install` step - Xcode
+#  resolves the Swift packages itself on first build. Codemagic tutorials
+#  usually say `--workspace ios/App/App.xcworkspace`; that is wrong for this
+#  repo and will fail.
+#
+#  WHY EVERY WORKFLOW REBUILDS THE WEB APP
+#  ios/.gitignore excludes `App/App/public` and `App/App/capacitor.config.json`,
+#  so the compiled web assets are NOT stored in git. A workflow that skipped
+#  `npm run build` + `npx cap sync` would ship an app that launches to a blank
+#  white screen. The API URL comes from the committed `.env.production` file,
+#  which Vite reads automatically - do not duplicate it as an env var here.
+# =============================================================================
+
+workflows:
+
+  # ===========================================================================
+  # 1. ios-unsigned - run this first; works with no credentials at all
+  # ===========================================================================
+  ios-unsigned:
+    name: iOS - unsigned test build (no Apple account needed)
+    # Hard stop (minutes) so a hung build cannot eat your whole monthly budget.
+    max_build_duration: 60
+    # Apple Silicon macOS VM. iOS code can only be compiled on macOS.
+    instance_type: mac_mini_m2
+    environment:
+      # package.json declares "engines": { "node": ">=20 <23" }.
+      node: 20
+      # "latest" = newest stable Xcode available on the Codemagic image.
+      xcode: latest
+    scripts:
+      - name: Install npm dependencies
+        script: |
+          # `npm ci` (not `npm install`) installs the exact versions pinned in
+          # package-lock.json, so CI builds are reproducible.
+          npm ci
+
+      - name: Build the web app with Vite
+        script: |
+          # Produces ./dist, which capacitor.config.json declares as webDir.
+          # Vite automatically loads .env.production here (VITE_API_URL).
+          npm run build
+
+      - name: Copy web assets into the iOS project
+        script: |
+          # `cap sync` copies ./dist into ios/App/App/public and regenerates
+          # the native config. Without this the built app would be empty,
+          # because those files are gitignored.
+          npx cap sync ios
+
+      - name: Build unsigned .app with xcodebuild
+        script: |
+          # We call xcodebuild directly instead of Codemagic's
+          # `xcode-project build-ipa` because an .ipa cannot be produced
+          # without a signing certificate. The CODE_SIGN* overrides switch
+          # signing off entirely, which is what lets this run with no Apple
+          # account. -project (not -workspace) because this app uses SPM.
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            -resultBundlePath build/App.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            build
+
+      - name: Zip the .app for download
+        script: |
+          # An .app is a folder, not a file. Zipping it makes it a single,
+          # reliably downloadable artifact from the Codemagic build page.
+          # `-y` keeps symlinks intact, which macOS bundles rely on.
+          cd build/Build/Products/Release-iphoneos
+          zip -r -y "$CM_BUILD_DIR/build/App-unsigned.zip" App.app
+    artifacts:
+      # Files matching these patterns are attached to the finished build.
+      - build/App-unsigned.zip
+      # The .xcresult bundle holds the full logs and errors - the first place
+      # to look when a build goes red, without having to re-run it.
+      - build/App.xcresult
+    publishing:
+      # No signing or store credentials here on purpose: email only.
+      email:
+        recipients:
+          - syedmuhammadr517@gmail.com
+
+  # ===========================================================================
+  # 2. ios-release - signed build, uploaded to TestFlight
+  #    This WILL FAIL until the `appstore_credentials` group exists (see the
+  #    header of this file for the exact variable names).
+  # ===========================================================================
+  ios-release:
+    name: iOS - signed release to TestFlight
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    # --- Automatic triggering is intentionally DISABLED ---------------------
+    # Uncomment the block below only when you are happy for EVERY push to
+    # `main` to consume build minutes and push a new build to TestFlight.
+    # Until then, start this workflow by hand from the Codemagic UI.
+    #
+    # triggering:
+    #   events:
+    #     - push
+    #   branch_patterns:
+    #     - pattern: main
+    #       include: true
+    #       source: true
+    #   # If you push twice in a minute, kill the older build rather than
+    #   # running both and wasting minutes.
+    #   cancel_previous_builds: true
+    # ------------------------------------------------------------------------
+    integrations:
+      # Connects the App Store Connect API key you registered in the Codemagic
+      # UI under Teams -> Integrations -> Developer Portal. The value on the
+      # right must match the name you gave that integration there.
+      app_store_connect: codemagic_app_store_connect
+    environment:
+      groups:
+        # Pulls in APP_STORE_CONNECT_*, CERTIFICATE_PRIVATE_KEY and
+        # APP_STORE_APP_ID. The group name must be exactly this.
+        - appstore_credentials
+      # Tells Codemagic to fetch (or create) a distribution certificate and a
+      # provisioning profile for this bundle id before the build starts, so
+      # you never have to touch Keychain or the Apple developer portal by hand.
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: uk.co.doorstep.app
+      node: 20
+      xcode: latest
+    scripts:
+      - name: Install npm dependencies
+        script: |
+          npm ci
+
+      - name: Build the web app with Vite
+        script: |
+          npm run build
+
+      - name: Copy web assets into the iOS project
+        script: |
+          # Same reason as in ios-unsigned: the web bundle is not in git.
+          npx cap sync ios
+
+      - name: Set the build number from TestFlight
+        script: |
+          # Apple rejects an upload whose build number it has seen before, so
+          # ask TestFlight for the highest existing build number and go one
+          # higher. The `|| true` plus the `-z` check covers the very first
+          # upload, when TestFlight has no builds yet and the command fails.
+          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APP_ID" 2>/dev/null) || true
+          if [ -z "$LATEST_BUILD_NUMBER" ]; then
+            # Nothing on TestFlight yet: fall back to the value already in the
+            # Xcode project (CURRENT_PROJECT_VERSION is currently 4).
+            LATEST_BUILD_NUMBER=4
+          fi
+          # agvtool must run from the folder containing the .xcodeproj.
+          # `new-version -all` writes CURRENT_PROJECT_VERSION into all targets.
+          # MARKETING_VERSION (1.2) is left alone - bump that by hand in Xcode
+          # when you want a new user-visible version number.
+          cd ios/App
+          agvtool new-version -all $((LATEST_BUILD_NUMBER + 1))
+
+      - name: Apply the provisioning profiles Codemagic fetched
+        script: |
+          # Writes the downloaded profiles and team id into the Xcode project
+          # so the build signs correctly without any manual Xcode setup.
+          xcode-project use-profiles
+
+      - name: Build signed .ipa
+        script: |
+          # --project, NOT --workspace: this app uses Swift Package Manager,
+          # so no .xcworkspace exists. Passing --workspace here is the single
+          # most common way this build breaks.
+          xcode-project build-ipa \
+            --project "ios/App/App.xcodeproj" \
+            --scheme "App"
+    artifacts:
+      # The installable, signed app.
+      - build/ios/ipa/*.ipa
+      # Raw xcodebuild logs, for diagnosing a failed compile or signing error.
+      - /tmp/xcodebuild_logs/*.log
+      # Debug symbols - needed later to turn crash reports into readable
+      # stack traces.
+      - build/ios/xcarchive/*.dSYM
+      - /tmp/xcodebuild_logs/*.dSYM
+    publishing:
+      app_store_connect:
+        # Reuse the API key from the `integrations` block above rather than
+        # repeating the key details here.
+        auth: integration
+        # Upload to TestFlight so you and your testers can install it.
+        submit_to_testflight: true
+        # Left off on purpose: turning this on would start public App Store
+        # review automatically on every single build.
+        submit_to_app_store: false
+      email:
+        recipients:
+          - syedmuhammadr517@gmail.com
+
+  # ===========================================================================
+  # 3. android-release - OPTIONAL
+  #    Only needed for Google Play. Skip it entirely if you are shipping iOS
+  #    first. It will fail until you create a keystore and add the
+  #    `keystore_credentials` variable group.
+  # ===========================================================================
+  android-release:
+    name: Android - signed release (OPTIONAL)
+    max_build_duration: 60
+    # Android can also build on Linux (`linux_x2`, cheaper). Kept on the same
+    # macOS image so there is only one machine type to reason about.
+    instance_type: mac_mini_m2
+    environment:
+      groups:
+        # Create this group in the Codemagic UI with four variables:
+        #   CM_KEYSTORE           - your .jks file, base64-encoded, "Secure"
+        #                           (on macOS/Linux: base64 -i my.jks | pbcopy)
+        #   CM_KEYSTORE_PASSWORD  - "Secure"
+        #   CM_KEY_ALIAS          - the alias you chose when running keytool
+        #   CM_KEY_PASSWORD       - "Secure"
+        # The keystore is deliberately NOT in this repo (.gitignore refuses
+        # *.jks): anyone holding it can publish updates as you, and losing it
+        # means you can never update the Play Store listing again.
+        - keystore_credentials
+      node: 20
+      # Capacitor 8's Android Gradle Plugin requires JDK 21.
+      java: 21
+    scripts:
+      - name: Install npm dependencies
+        script: |
+          npm ci
+
+      - name: Build the web app with Vite
+        script: |
+          npm run build
+
+      - name: Copy web assets into the Android project
+        script: |
+          npx cap sync android
+
+      - name: Decode the keystore and write keystore.properties
+        script: |
+          # Environment variables cannot hold binary, so the keystore travels
+          # as base64 and is decoded back into a real file on the build
+          # machine. The VM is destroyed afterwards, so nothing leaks.
+          echo "$CM_KEYSTORE" | base64 --decode > "$CM_BUILD_DIR/android/keystore.jks"
+          # android/app/build.gradle must read this file for signing to take
+          # effect. If it does not yet, the build still succeeds but produces
+          # an UNSIGNED .aab/.apk that Google Play will reject on upload.
+          cat > "$CM_BUILD_DIR/android/keystore.properties" <<EOF
+          storeFile=$CM_BUILD_DIR/android/keystore.jks
+          storePassword=$CM_KEYSTORE_PASSWORD
+          keyAlias=$CM_KEY_ALIAS
+          keyPassword=$CM_KEY_PASSWORD
+          EOF
+
+      - name: Build release APK and AAB
+        script: |
+          cd android
+          # assembleRelease -> .apk (direct install / sideloading / testing)
+          # bundleRelease   -> .aab (the format Google Play requires)
+          ./gradlew assembleRelease bundleRelease
+    artifacts:
+      - android/app/build/outputs/**/*.aab
+      - android/app/build/outputs/**/*.apk
+      # Gradle's obfuscation map, needed to read Android crash reports.
+      - android/app/build/outputs/mapping/**/mapping.txt
+    publishing:
+      # NOTE: there is intentionally NO `google_play:` block. Publishing to the
+      # Play Store stays manual - download the .aab from this build and upload
+      # it yourself until you are confident in the pipeline.
+      email:
+        recipients:
+          - syedmuhammadr517@gmail.com

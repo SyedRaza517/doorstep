@@ -1,5 +1,20 @@
 apply plugin: 'com.android.application'
 
+/* Signing for CI. Codemagic writes android/keystore.properties on the build
+   machine from secure variables, because a keystore must never live in the
+   repo - anyone holding it can publish updates as us, and losing it means the
+   Play listing can never be updated again.
+
+   When that file is absent - every local build, and any fresh clone - the
+   release build has no signing config at all, exactly as before, so signing
+   from Android Studio's own dialog keeps working untouched. */
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+def hasKeystore = keystorePropertiesFile.exists()
+if (hasKeystore) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace = "uk.co.doorstep.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,8 +31,22 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (hasKeystore) {
+            release {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
+            /* Only when CI supplied a keystore; otherwise unchanged. */
+            if (hasKeystore) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
