@@ -172,6 +172,9 @@ workflows:
         # Used by the signing step below. Must match PRODUCT_BUNDLE_IDENTIFIER
         # in the Xcode project and the App ID registered with Apple.
         BUNDLE_ID: "uk.co.doorstep.app"
+        # Apple Developer Team ID, from the App ID page in the developer
+        # portal. Not a secret - it ships inside every signed binary.
+        TEAM_ID: "LLKU246YAG"
       # NOTE: there is deliberately no `ios_signing:` block here. That block
       # only FETCHES signing files that already exist, and fails with
       # "No matching profiles found" on an account that has never built this
@@ -212,37 +215,51 @@ workflows:
           cd ios/App
           agvtool new-version -all $((LATEST_BUILD_NUMBER + 1))
 
-      - name: Set up code signing
+      - name: Set up code signing and build the signed .ipa
         script: |
-          # A fresh Apple account has no distribution certificate and no
-          # provisioning profile - those are normally made by hand in Xcode on
-          # a Mac. `--create` tells Codemagic to make whatever is missing,
-          # which is why this works on a machine that has never seen the app.
-          #
-          # `keychain initialize` makes a throwaway keychain on the build VM to
-          # hold the certificate; the VM is destroyed afterwards.
+          set -e
+
+          # These are one step on purpose. The profile name is read back from
+          # disk below and handed straight to xcodebuild; splitting them would
+          # lose that shell variable between steps.
+
+          # A throwaway keychain on the build VM to hold the certificate.
           keychain initialize
 
-          # Fetches the App Store distribution certificate and profile for this
-          # bundle id, creating either one if Apple does not have it yet.
-          app-store-connect fetch-signing-files "$BUNDLE_ID"             --type IOS_APP_STORE             --create
+          # Fetch the App Store distribution certificate and profile for this
+          # bundle id, creating either if Apple does not have it yet.
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
 
-          # Loads the certificate into the keychain xcodebuild will read.
+          # Load the certificate into the keychain xcodebuild reads.
           keychain add-certificates
 
-          # Writes the profile into the Xcode project so the build signs
-          # without any manual Xcode setup. --project is explicit so it cannot
-          # patch the wrong thing or silently patch nothing.
+          # Patch the Xcode project with the profile.
           xcode-project use-profiles --project "ios/App/App.xcodeproj"
 
-      - name: Build signed .ipa
-        script: |
-          # --project, NOT --workspace: this app uses Swift Package Manager,
-          # so no .xcworkspace exists. Passing --workspace here is the single
-          # most common way this build breaks.
+          # --- read back what actually landed, and show it in the log --------
+          # If signing goes wrong again, this is the evidence: it prints the
+          # real profile name and the signing settings xcodebuild will use.
+          PROFILE_FILE=$(ls -t "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision | head -1)
+          security cms -D -i "$PROFILE_FILE" > /tmp/profile.plist
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" /tmp/profile.plist)
+          echo "--- provisioning profile in use ---"
+          echo "file: $PROFILE_FILE"
+          echo "name: $PROFILE_NAME"
+          echo "team: $TEAM_ID"
+          echo "-----------------------------------"
+
+          # --- build --------------------------------------------------------
+          # `use-profiles` patches the project, but the archive is run with
+          # CODE_SIGN_STYLE=Manual, and manual signing needs the team, the
+          # identity AND the profile named on the command line. Relying on the
+          # patch alone fails with:
+          #   "App" requires a provisioning profile.
+          # So they are passed explicitly here. --project, not --workspace,
+          # because this app uses Swift Package Manager and has no workspace.
           xcode-project build-ipa \
             --project "ios/App/App.xcodeproj" \
-            --scheme "App"
+            --scheme "App" \
+            --archive-xcargs "CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=$TEAM_ID CODE_SIGN_IDENTITY=\"Apple Distribution\" PROVISIONING_PROFILE_SPECIFIER=\"$PROFILE_NAME\""
     artifacts:
       # The installable, signed app.
       - build/ios/ipa/*.ipa
